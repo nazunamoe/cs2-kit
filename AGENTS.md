@@ -133,6 +133,8 @@ K.export_asset(NAME, LEVEL, dict(main=mb, lod1=l1, lod2=l2, gls=g, lod1_gls=g1, 
 ## CS2 facts (the kit enforces most)
 Name `<Name>_L<level>_<w>x<d>`, no underscore inside Name, residential names contain `ResidentialHigh`. Lot cell 8 m; zoned max 6x6, larger = signature building.
 Main about 50k tris (max 95k). LOD1 < 50% of main. LOD2 <= 500 tris. Details < 5 cm go to the normal map (painter height/joints), bigger details are mesh.
+`export_asset` writes the LOD1 texture maps by copying the main 5 maps under `<asset>_LOD1_<map>.png` (never copy them in the generator).
+`lod_check` reports `NO_TEXTURE` when a map for a mesh is missing; that makes the LOD render like glass in game.
 Defaults when unknown: residential floor height 2.9 m, shop ground floor 5.5 m, upper shop floors 4.5 m. Atlas 4096.
 Texel targets: eye level 256 px/m, main walls 128, roof/high 64 (px / tile size).
 Real mesh detail is wanted: window frames/mullions, sills, glass railings (gls) + handrail, louver blades, canopy, columns, doors, parapet coping, roof equipment, fences.

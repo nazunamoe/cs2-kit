@@ -44,10 +44,15 @@ CS2 한국 건물 에셋을 만들 때 쓰는 도구 모음이다. 모든 명령
 python tools/cycle.py my_building_cs2.py --label windows
 python tools/cycle.py my_building_cs2.py --no-render           # 검사만 (그림 없음, 빠름)
 python tools/cycle.py my_building_cs2.py --views front,iso --list 3
+python tools/cycle.py my_building_cs2.py --full --json        # 검사+사진+타일+LOD, 결과 JSON 저장
 ```
 - 하는 일: 생성기 실행 → `check.py` → `render.py` → (`photo_refs.json` 있으면) `photo_check.py`.
+- `--full` 은 `tile_compare.py` 와 `tools_local/lod_check.py` 까지 실행하고 `GATE` 줄을 하나 더 낸다
+  (`lod_check` 는 FBX/.blend 와 Blender 가 필요, 없으면 `lod=SKIP`).
+- `--json` 은 모든 결과를 `output/<에셋>/_check/gate.json` 에 쓴다(경로를 주면 그곳).
 - 마지막 줄: `RESULT PASS|FAIL errors=N warnings=M [photo_mismatch=K] asset=<이름> preview=<경로>`.
-  종료 코드: 실행 실패 2 / 검사 오류 1 / 통과 0.
+  `GATE` 는 검사 오류·사진 불일치·LOD 를 합친 요약. 종료 코드는 예전과 같이 검사 오류만 본다
+  (실행 실패 2 / 검사 오류 1 / 통과 0).
 - 그림: `previews/<에셋>.png`(최신), `previews/progress/latest.png`(항상 최신 한 장), `previews/progress/<에셋>/NNN_시각_label.png`(단계별 기록).
   `--label` 은 영문·숫자·`-`/`_` 만 쓴다. 사용자는 `latest.png` 를 열어 두고 진행을 본다.
 - 사진 비교 줄: `PHOTO_MISMATCH ...` 가 나오면 그 층 수·층고·창 간격을 고친다. 시트는 `previews/photo_check/*.png`.

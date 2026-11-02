@@ -55,7 +55,7 @@ python tools/cycle.py example_building_cs2.py                       # 생성 + �
 python tools/check.py output                                        # 검증만
 python tools/render.py output/<에셋> -o previews/a.png                # 미리보기만
 ```
-`output/<에셋>/` 에 FBX 8종(메인·_Win·_Gls·_LOD1·_LOD1_Win·_LOD1_Gls·_LOD2·_LOD2_Win), 텍스처 5종 x (메인 + LOD2),
+`output/<에셋>/` 에 FBX 8종(메인·_Win·_Gls·_LOD1·_LOD1_Win·_LOD1_Gls·_LOD2·_LOD2_Win), 텍스처 5종 x (메인 + LOD1 + LOD2),
 `manifest.json`(크기·로트·tris·아틀라스 배치), `_check/*.obj`(검사용 — 게임에 넣지 않음)이 생긴다.
 
 ## 2. cs2kit — 생성기 쓰는 법

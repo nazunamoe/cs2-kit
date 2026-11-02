@@ -10,7 +10,7 @@ cs2kit.py — Cities: Skylines II 건물 에셋 생성기 공통 라이브러리
   Atlas            가변 크기 칸 아틀라스: 색·색상변형·메탈·광택·발광, 타일 재질(실제 크기 UV), 사진 조각 넣기,
                    칸 그림 그리기(painter), 노멀 높이맵, 블리드(밉맵 번짐 방지), JSON 배치표 저장
   WindowSet        창문 면 모으기 + 레퍼런스 25칸 UV 배정 (겹침 없음, 비율 유지)
-  export_asset     피벗 맞추기 → 텍스처 5종(메인 + LOD2) → Blender 안이면 FBX/.blend, 밖이면 OBJ + manifest.json
+  export_asset     피벗 맞추기 → 텍스처 5종(메인 + LOD1 + LOD2) → Blender 안이면 FBX/.blend, 밖이면 OBJ + manifest.json
 
 좌표: 1 유닛 = 1 m, 지면 z = 0, 정면(도로) = -Y. 면 이름: front=-Y, back=+Y, left=-X, right=+X
 사용 예: example_building_cs2.py 참고
@@ -19,6 +19,7 @@ cs2kit.py — Cities: Skylines II 건물 에셋 생성기 공통 라이브러리
 import json
 import math
 import os
+import shutil
 import struct
 import sys
 import zlib
@@ -744,9 +745,12 @@ def export_asset(name_base, level, meshes, atlas, out_root, lod2_tex=1024, lot=N
     asset, lot_wd = asset_name(name_base, level, size[:2], front_yard=front_yard, lot=lot)
     folder = os.path.join(out_root, asset)
     os.makedirs(folder, exist_ok=True)
-    # 텍스처
+    # 텍스처. 게임은 메시 이름으로 <메시>_<맵>.png 를 찾으므로 LOD1 맵도 같은 내용으로 반드시 있어야 한다.
+    # 없으면 LOD1 이 유리처럼 그려져 중간 거리에서 벽이 비친다(lod_check 의 NO_TEXTURE 검사).
     for suffix, arr in atlas.render().items():
-        write_png(os.path.join(folder, f"{asset}_{suffix}.png"), arr)
+        path = os.path.join(folder, f"{asset}_{suffix}.png")
+        write_png(path, arr)
+        shutil.copyfile(path, os.path.join(folder, f"{asset}_LOD1_{suffix}.png"))
     for suffix, arr in atlas.render(size=lod2_tex).items():
         write_png(os.path.join(folder, f"{asset}_LOD2_{suffix}.png"), arr)
     warns = []
@@ -762,7 +766,7 @@ def export_asset(name_base, level, meshes, atlas, out_root, lod2_tex=1024, lot=N
         warns.append("main > 95000 tris")
     summary = dict(asset=asset, lot=lot_wd, size=[round(s, 3) for s in size], pivot_shift=[-cx, -cy],
                    tris={k: parts[k].tri_count for k in PARTS}, windows=len(win_main.faces), tex=atlas.size,
-                   lod2_tex=lod2_tex, warnings=warns, notes=notes or {})
+                   lod1_tex=atlas.size, lod2_tex=lod2_tex, warnings=warns, notes=notes or {})
     with open(os.path.join(folder, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(dict(summary, atlas=atlas.to_json(), tags={k: sorted(set(parts[k].tags)) for k in PARTS}), f,
                   ensure_ascii=False, indent=1)
