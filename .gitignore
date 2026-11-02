@@ -1,0 +1,23 @@
+# 파이썬
+__pycache__/
+*.py[cod]
+
+# 로컬/생성물
+blender_path.txt
+*.zip
+*.blend
+*.blend1
+*.fbx
+
+# 작업 폴더 (배포본에는 없지만 실수 방지)
+/projects/
+/memory/
+/previews/
+/output/
+/capture/out/
+/capture/urls_*.txt
+
+# 편집기/OS
+.claude/
+.DS_Store
+Thumbs.db

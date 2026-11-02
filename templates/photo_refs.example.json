@@ -1,0 +1,21 @@
+{
+  "_help": "Copy to photo_refs.json and fill in. Pixel coords: python tools/sat_grid.py grid <photo> -o previews/g.png --step 50 (or MS Paint bottom bar). Delete parts you do not have.",
+  "satellite": {
+    "file": "roof.png",
+    "corners": [[100, 400], [700, 410], [705, 120], [95, 110]],
+    "_corners_order": "building outline: front-left, front-right, back-right, back-left (front = street side)",
+    "m_per_px": 0.25,
+    "_m_per_px": "optional: python tools/sat_grid.py scale --p x,y --q x,y --meters M  (use a known length)"
+  },
+  "facades": [
+    {
+      "file": "front.jpg",
+      "side": "front",
+      "corners": [[220, 80], [980, 140], [975, 900], [230, 950]],
+      "name": "front",
+      "size_m": [60, 45],
+      "_size_m": "optional, for tools/facade_paint.py: real width and height (m) of the wall part inside corners; x_m / z_m = where it lies on the wall",
+      "_corners_order": "that whole wall as seen in the photo: top-left, top-right, bottom-right, bottom-left (top = roof/parapet top, bottom = ground)"
+    }
+  ]
+}
