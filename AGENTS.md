@@ -34,13 +34,13 @@ Read lines (with numbers):  `python tools/show.py <file> 40 90`   or   `python t
 Change part of a file (SEARCH must be copied exactly from show.py output, without the line numbers):
 ```
 @'
-<<<<<<< SEARCH
+=== SEARCH
 FLOORS = 8
-=======
+=== REPLACE
 FLOORS = 15
->>>>>>> REPLACE
 '@ | python tools/edit.py <Name>_cs2.py
 ```
+The two marker lines are `=== SEARCH` and `=== REPLACE` (three or more `=`). There is no third marker line.
 - Several SEARCH/REPLACE blocks may follow each other in one call.
 - To add new code, SEARCH an anchor line (e.g. `# (4) Export`) and REPLACE with the new code followed by the anchor line.
 - If the result would be a Python syntax error, edit.py writes NOTHING and shows the error. Fix the block and retry.

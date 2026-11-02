@@ -2,22 +2,24 @@
 """
 edit.py - change part of a file with SEARCH/REPLACE blocks read from stdin (no quoting problems).
 
+A block has two marker lines: one opens the old text, one opens the new text.
+A marker line starts with three or more '=' characters followed by the word
+SEARCH or REPLACE (no diff-style conflict markers).
+
 PowerShell:
     @'
-    <<<<<<< SEARCH
+    === SEARCH
     FLOORS = 8
-    =======
+    === REPLACE
     FLOORS = 15
-    >>>>>>> REPLACE
     '@ | python tools/edit.py my_building_cs2.py
 
 bash / Git Bash / WSL:
     python tools/edit.py my_building_cs2.py <<'EOF'
-    <<<<<<< SEARCH
+    === SEARCH
     FLOORS = 8
-    =======
+    === REPLACE
     FLOORS = 15
-    >>>>>>> REPLACE
     EOF
 
 Rules
@@ -36,7 +38,11 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from put import normalize, read_stdin, safe_print, syntax_report  # noqa: E402
 
-BLOCK = re.compile(r"^<{5,9} ?SEARCH[^\n]*\n(.*?)^={5,9}[^\n]*\n(.*?)^>{5,9} ?REPLACE[^\n]*$", re.S | re.M)
+# new style (two markers); the older diff-style form is still accepted
+BLOCK = re.compile(
+    r"^={3,9} ?SEARCH[^\n]*\n(.*?)^={3,9} ?REPLACE[^\n]*\n(.*?)(?=^={3,9} ?SEARCH|\Z)",
+    re.S | re.M)
+BLOCK_OLD = re.compile(r"^<{5,9} ?SEARCH[^\n]*\n(.*?)^={5,9}[^\n]*\n(.*?)^>{5,9} ?REPLACE[^\n]*$", re.S | re.M)
 
 
 def strip_trailing(s):
@@ -87,7 +93,9 @@ def main():
     raw = normalize(read_stdin())
     blocks = BLOCK.findall(raw)
     if not blocks:
-        safe_print("NOT APPLIED: no blocks found. Use exactly:\n<<<<<<< SEARCH\nold lines\n=======\nnew lines\n>>>>>>> REPLACE")
+        blocks = BLOCK_OLD.findall(raw)
+    if not blocks:
+        safe_print("NOT APPLIED: no blocks found. Put each block as:\n=== SEARCH\nold lines\n=== REPLACE\nnew lines")
         sys.exit(1)
     new = text
     num = re.compile(r"^ ?>?>? *\d+\| ?")
