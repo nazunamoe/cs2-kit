@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 photo_sections.py (was paint_from_detail.py) - photo section registry PHOTOS + row fit, used by every
-facade_tools script. Its old main() (per-cell auto paint, do NOT use for final paint) reads the paint of every wall, floor by floor, from the near-frontal detail photos
+tools/samhan_facade script. Its old main() (per-cell auto paint, do NOT use for final paint) reads the paint of every wall, floor by floor, from the near-frontal detail photos
 (atype-1..8, btype-1..8: 3D-map facade views, labels "NN F" mark floors).
 
 Every photo is cut into SECTIONS (one depth group of walls that face the camera, e.g. the near head or the bar

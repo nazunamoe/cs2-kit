@@ -24,7 +24,7 @@ Cities: Skylines II 건물 생성기를 만들 때 **매번 새로 짜던 공통
     render.py               ← 미리보기 PNG (Blender 불필요)
     extract_texture.py      ← 사진 → 반듯한 재질 텍스처 + 노멀·광택
     sat_grid.py             ← 사진 격자·축척·픽셀→미터
-  facade_tools/             ← (선택) 상세 사진에서 층 번호·도색·창 읽기 보조 도구 묶음 — facade_tools/README.md
+  tools/samhan_facade/             ← (선택) 상세 사진에서 층 번호·도색·창 읽기 보조 도구 묶음 — tools/samhan_facade/README.md
     compare.py              ← 수정 전 스냅샷 / 전후 비교
     run_blender.py          ← Blender 찾기 + 실행, FBX→OBJ
     objio.py                ← (내부용) OBJ·PNG 읽기
@@ -242,12 +242,12 @@ Blender 가 없으면 생성기를 일반 python 으로 돌려 OBJ·텍스처까
 
 | 폴더 | 내용 | 필요 환경 |
 |---|---|---|
-| `tools_scan/` | glb/gltf 스캔 분석: 메시 목록, 높이별 단면(꼭짓점 좌표), **옥상 레벨·성분(데크/파라펫 띠/옥탑 상자)**, 높이장, 실루엣, 모델 OBJ 자동 정렬 비교 | Python + numpy, matplotlib, Pillow (Blender 불필요) |
-| `tools_local/` | `lod_check.py`: 게임처럼 뒷면을 안 그릴 때 LOD별 구멍(투명) 비율 검사 | Blender |
-| `facade_tools/` | 사진에서 층·도색·창을 읽는 보조 도구 (특정 생성기 구조 전용 — 폴더의 `README.md` 참고) | Python + numpy, Pillow |
+| `tools/scan/` | glb/gltf 스캔 분석: 메시 목록, 높이별 단면(꼭짓점 좌표), **옥상 레벨·성분(데크/파라펫 띠/옥탑 상자)**, 높이장, 실루엣, 모델 OBJ 자동 정렬 비교 | Python + numpy, matplotlib, Pillow (Blender 불필요) |
+| `tools/qa/` | 검증(보고 전): `verify.py`(빌드+검사 후 LOD 검사·미리보기·사진 비교를 병렬로 일괄), `lod_check.py`(LOD별 뒷면 구멍 비율), `cmp_cam.py`(VR 사진의 meta 카메라로 모델을 같은 원근으로 렌더해 겹침, `--frame` 지원), `lodcam.py`, `modcam.py` | Blender, numpy, Pillow |
+| `tools/samhan_facade/` | 사진에서 층·도색·창을 읽는 보조 도구 (특정 생성기 구조 전용 — 폴더의 `README.md` 참고) | Python + numpy, Pillow |
 | `capture/` | `naver_vr.py`: 네이버 부동산 VR 단지 뷰에서 동별 8방향 입면 캡처 | Chrome(원격 디버깅 포트) |
 
-사용법은 각 폴더의 `README.md` 와 파일 머리 주석을 본다. `tools_scan` 은 `tools_scan/README.md` 에 예제가 자세히 있다.
+폴더 지도는 `tools/README.md`. 사용법은 각 폴더의 `README.md` 와 파일 머리 주석을 본다. `tools/scan` 은 `tools/scan/README.md` 에 예제가 자세히 있다.
 
 **배포본에서 빠진 것**: `projects/`(건물 작업 폴더), `memory/`(개인 학습 기록 — 템플릿 `templates/memory/` 는 포함),
 `previews/`, `output/`, `capture/out/`(캡처 이미지), `tools/blender_path.txt`(로컬 설치 경로), `__pycache__`.
@@ -256,6 +256,6 @@ Blender 가 없으면 생성기를 일반 python 으로 돌려 OBJ·텍스처까
 - `facade_engine.py`(키트 루트): 높이장 외벽 + zone 표(창·도색 띠·흰 틀·루버) + 저층부 + LOD1/LOD2 + 파라펫·난간. 특정 건물 정보는 없다.
 - 건물 하나 = `<이름>_data.py`(blocks·zones·parts, `tower()` 와 `atlas_extra(A)`) + 6줄짜리 실행기 `<이름>_cs2.py`. 예: `examples/facade_slab_wing_data.py`, `examples/facade_slab_wing_cs2.py`
   (판상 + 45도 꺾인 동체, 저층부 화강석 띠, 입구, 루버 화면). 틀의 설명은 `facade_engine.py` 맨 위 docstring.
-- 값을 채우는 도구: `tools_scan/facade/` (정사영 렌더, 창 목록, 흰 틀·세로 띠 측정, **스캔|모델 정사영 비교 `pair_ortho.py`**, COPLANAR 진단, 옥상 난간 조사). 사용법은 그 폴더 README.md, 방법·함정은 `docs/FACADE_KNOWHOW.md`.
+- 값을 채우는 도구: `tools/facade/` (정사영 렌더, 창 목록, 흰 틀·세로 띠 측정, **스캔|모델 정사영 비교 `pair_ortho.py`**, COPLANAR 진단, 옥상 난간 조사). 사용법은 그 폴더 README.md, 방법·함정은 `docs/FACADE_KNOWHOW.md`.
 - 엔진 옵션: `SASH`(미닫이 2짝), `RAIL_F`(난간 모서리 레일 끝), `canopies` 7번째 항목(재질, 밑면 있는 닫힌 상자), `ROOF_RAILS`/`RAIL_DIM`(옥상 철제 난간).
 - 검증: 건물 한 채(위 예제)를 단일 파일 생성기와 새 구조로 각각 빌드해 tris·창 수가 같음을 확인했다. 다른 건물로의 이식은 아직 안 해 봤다.

@@ -47,6 +47,7 @@ PARAPET = 1.6       # parapet height above the roof slab; building data may set 
 PT = 0.3            # parapet thickness
 WIN_IN = 0.20       # window glass set back from the wall face (reveal depth); the light line under a window in the photos is this reveal, NOT a sill bar
 CREAM_BAND = False  # the scan's cream parapet band is a steel railing (user 2026-10-30) -> ROOF_RAILS / build_roof_rails
+MIRROR_Y = False    # facade_engine.MIRROR_Y = True mirrors the finished tower front<->back (data frame was a mirror image of reality)
 SASH = False        # building data may set facade_engine.SASH = True: 1.0-1.8 m windows become 2-sash sliders
 CW_IN = 0.12      # glass set back in curtain-wall-look (black) zones
 
@@ -1560,6 +1561,19 @@ def build_roof_rails(T, segs, main, lod1):
                 if u1 - b1 - 0.02 > 0.3:
                     nxt.append((b1 + 0.02, u1))
             cur = nxt
+        for sk in T.get("rail_skip", ()):            # (axis, c, a0, a1): no railing on that part of a run (a screen wall stands there)
+            if sk[0] != g["axis"] or abs(sk[1] - g["c"]) > 1e-3:
+                continue
+            nxt = []
+            for u0, u1 in cur:
+                if sk[3] <= u0 or sk[2] >= u1:
+                    nxt.append((u0, u1))
+                    continue
+                if sk[2] - u0 > 0.3:
+                    nxt.append((u0, sk[2]))
+                if u1 - sk[3] > 0.3:
+                    nxt.append((sk[3], u1))
+            cur = nxt
         for u0, u1 in cur:
             P = [(u0, o), (u1, o)] if g["axis"] == "y" else [(o, u0), (o, u1)]
             lines.append(dict(pts=P, z0=g["z0"], ax=g["axis"]))
@@ -2038,7 +2052,25 @@ def build(A, T):
             rotate_wins(res["windows"], rot, dx, dy)
         wins.items += res["windows"].items
     out["windows"] = wins
+    if MIRROR_Y:
+        mirror_y(out, wins)
     return out
+
+
+def mirror_y(out, wins):
+    """reflect the whole tower front <-> back (y -> ymin + ymax - y) and keep the faces facing outward:
+    quad vertex order (a, b, c, d) -> (b, a, d, c) with the UVs unchanged (texture still reads left to right from outside).
+    Used when the scan -> generator frame turned out to be a mirror image of the real building (101: photos vs model)."""
+    ys = [v[1] for v in out["main"].verts]
+    k = min(ys) + max(ys)
+    for mb in out.values():
+        if hasattr(mb, "verts"):
+            mb.verts = [(x, k - y, z) for x, y, z in mb.verts]
+            mb.faces = [(f[1], f[0], f[3], f[2]) if len(f) == 4 else tuple(reversed(f)) for f in mb.faces]
+    for it in wins.items:
+        for key in ("pts", "pts2"):
+            q = [(x, k - y, z) for x, y, z in it[key]]
+            it[key] = [q[1], q[0], q[3], q[2]]
 
 
 STAIR_WIN = {"A": (0.0, 0.85), "B": (1.4, 2.25)}     # stair windows sit on the landings, not on the room-window line (scan, same on 101-104)

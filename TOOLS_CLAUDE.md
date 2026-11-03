@@ -17,7 +17,7 @@ CS2 한국 건물 에셋을 만들 때 쓰는 도구 모음이다. 모든 명령
 | 사진에서 재질 뽑기 | `extract_texture.py` | `python tools/extract_texture.py 사진.jpg --pts ... --size 3.0x2.9 -o textures_src/stone` |
 | 스캔(.glb)에서 치수 재기 | `glb_measure.py` | `python tools/glb_measure.py scan.glb --list` |
 | 사진 한 벽에서 층·창·도색 읽기 (범용) | `tools/facade_paint.py` | `python tools/facade_paint.py all --name front --fh 3.0 --feature-floor 29` |
-| 상세 사진에서 층·도색·창 읽기 (특정 생성기용) | `facade_tools/*` | `python facade_tools/refuge_scan.py ...` (사용법: `facade_tools/README.md`) |
+| 상세 사진에서 층·도색·창 읽기 (특정 생성기용) | `tools/samhan_facade/*` | `python tools/samhan_facade/refuge_scan.py ...` (사용법: `tools/samhan_facade/README.md`) |
 | 고치기 전/후 비교 | `compare.py` | `snap` → 수정 → `diff` |
 | Blender 찾기·실행·FBX→OBJ | `run_blender.py` | `python tools/run_blender.py --find` |
 
@@ -47,7 +47,7 @@ python tools/cycle.py my_building_cs2.py --views front,iso --list 3
 python tools/cycle.py my_building_cs2.py --full --json        # 검사+사진+타일+LOD, 결과 JSON 저장
 ```
 - 하는 일: 생성기 실행 → `check.py` → `render.py` → (`photo_refs.json` 있으면) `photo_check.py`.
-- `--full` 은 `tile_compare.py` 와 `tools_local/lod_check.py` 까지 실행하고 `GATE` 줄을 하나 더 낸다
+- `--full` 은 `tile_compare.py` 와 `tools/qa/lod_check.py` 까지 실행하고 `GATE` 줄을 하나 더 낸다
   (`lod_check` 는 FBX/.blend 와 Blender 가 필요, 없으면 `lod=SKIP`).
 - `--json` 은 모든 결과를 `output/<에셋>/_check/gate.json` 에 쓴다(경로를 주면 그곳).
 - 마지막 줄: `RESULT PASS|FAIL errors=N warnings=M [photo_mismatch=K] asset=<이름> preview=<경로>`.
@@ -152,9 +152,9 @@ python tools/glb_measure.py scan.glb --mesh Building --scale 0.01   # cm 단위�
 - 결과: `previews/facade/<name>_floors_N.png`, `<name>_paint_N.png`(사진 | 사각형 | 차이), `<name>.json`.
 - 한계: 사진 속 원근·그림자·나무가 심하면 틀릴 수 있다. 번호 그림과 도색 그림을 반드시 눈으로 확인하고, 합성 사진으로만 시험했다.
 
-### facade_tools/ — 상세 사진에서 층 번호·도색·창 읽기 (삼한골든뷰 전용)
-정면에 가까운 상세 사진이 여러 장 있는 고층 건물에서 **층 번호를 정확히 세고**(대피층 등 특징 층부터), 벽마다 **도색 구간(층 범위 x 가로 범위)** 과 **창 위치·크기**를 읽어 생성기 표(`WALLS`/`WIN`)로 옮기는 보조 도구 묶음이다. 사용법은 `facade_tools/README.md`.
-- 프로젝트 루트에서 실행(`python facade_tools/<도구>.py`), 결과 그림은 `previews/`. 필요: numpy, Pillow.
+### tools/samhan_facade/ — 상세 사진에서 층 번호·도색·창 읽기 (삼한골든뷰 전용)
+정면에 가까운 상세 사진이 여러 장 있는 고층 건물에서 **층 번호를 정확히 세고**(대피층 등 특징 층부터), 벽마다 **도색 구간(층 범위 x 가로 범위)** 과 **창 위치·크기**를 읽어 생성기 표(`WALLS`/`WIN`)로 옮기는 보조 도구 묶음이다. 사용법은 `tools/samhan_facade/README.md`.
+- 프로젝트 루트에서 실행(`python tools/samhan_facade/<도구>.py`), 결과 그림은 `previews/`. 필요: numpy, Pillow.
 - **특정 생성기 구조 전제**(`HALF`, `full_poly()`, `edges_of()` 등)와 이전 작업의 환경 변수 기본값(`FACADE_GLB`, `FACADE_MESHES`)이 들어 있다. 새 건물에 쓸 때는 README 의 "생성기 조건"을 확인하고 `FACADE_*` 를 지정한다.
 - 도구: `plan_index`(평면 벽 번호) · `facade_read`(확대 사진+층별 표) · `refuge_scan`(대피층부터 층 세기, 핵심) · `band_scan` · `window_template`(한 층 창 모양) · `refuge_crop` · `montage` · `window_count` · `glb_slices`/`glb_mirror_test`(스캔 평면 비교).
 

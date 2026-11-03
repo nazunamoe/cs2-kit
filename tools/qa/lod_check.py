@@ -1,16 +1,16 @@
 """LOD 투명(구멍) 검사 — 게임처럼 뒷면을 그리지 않을 때 메인/LOD1/LOD2 에서 건물 안쪽 뒷면이 비치는 곳
 (앞면이 빠졌거나 뒤집힌 곳 = 게임에서 "투명해 보이는" 곳)을 여러 각도에서 잰다. LOD 는 메인도 막혀 있는 자리만 센다.
 
-키트 밖 도구(tools_local/). cycle.py 다음에, 보고 전에 매번 돌린다.
-  python tools_local/lod_check.py output/<asset>                # 활성 프로젝트 기준 경로
-  python tools_local/lod_check.py output/<asset> --az 16 --elev -10,5,25,50 --res 512
+검증 도구(tools/qa/). cycle.py 다음에, 보고 전에 매번 돌린다.
+  python tools/qa/lod_check.py output/<asset>                # 활성 프로젝트 기준 경로
+  python tools/qa/lod_check.py output/<asset> --az 16 --elev -10,5,25,50 --res 512
 
 출력: previews/lod_check/<asset>/  (구멍이 보인 각도마다 그림: 회색 = 메인만, 흰색 = LOD 도 있음, 빨강 = 구멍)
 마지막 줄: LODCHECK PASS|FAIL lod1 max X% (az, el) lod2 max Y% ...   기준: 각 각도 구멍 0.05% 이하 = PASS
 """
 import argparse, json, os, subprocess, sys, glob
 
-KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+KIT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tools/qa/ -> 키트 루트
 LIMIT = 0.05
 
 
@@ -55,7 +55,7 @@ def main():
     os.makedirs(out, exist_ok=True)
     for f in glob.glob(os.path.join(out, "*.png")):
         os.remove(f)
-    cmd = [blender_exe(), "-b", path, "-P", os.path.join(KIT, "tools_local", "lod_check_bl.py"), "--",
+    cmd = [blender_exe(), "-b", path, "-P", os.path.join(KIT, "tools", "qa", "lod_check_bl.py"), "--",
            out, str(a.res), str(a.az), a.elev]
     for _ in range(2):                                 # once more on a one-off Blender failure (file still being written)
         r = subprocess.run(cmd, capture_output=True, text=True)
@@ -86,7 +86,7 @@ def main():
                 gx = [p["xyz"][0] - shift[0], p["xyz"][1] - shift[1], p["xyz"][2]]
                 print(f"      at gen ({gx[0]:.2f}, {gx[1]:.2f}, {gx[2]:.2f})  normal {tuple(p['normal'])}  {p['px']} px  [{p['obj']}]")
     # 텍스처: 게임은 메시 이름으로 <메시>_<맵>.png 를 찾는다. LOD 에 자기 이름의 맵이 없으면 유리처럼(투명) 그려진다
-    # (2026-10-31, photos/trans.png: 키트가 LOD1 맵을 안 만들어 중간 거리에서 벽이 비침)
+    # (사용자 확인: 키트가 LOD1 맵을 안 만들어 중간 거리에서 벽이 비친 적이 있음)
     adir = os.path.dirname(path)
     for mesh in (name, name + "_LOD1", name + "_LOD2"):
         if not os.path.exists(os.path.join(adir, mesh + ".fbx")):

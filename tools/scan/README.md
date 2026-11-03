@@ -1,4 +1,4 @@
-# tools_scan — glb/gltf 건물 스캔 분석 도구
+# tools/scan — glb/gltf 건물 스캔 분석 도구
 
 3D 지도(네이버 부동산 등) glb 스캔을 **다른 프로젝트에서도 그대로** 뜯어볼 수 있는 도구.
 키트의 `tools/`, `cs2kit.py` 는 건드리지 않는다. 의존성: numpy, matplotlib, Pillow (블렌더 불필요).
@@ -8,7 +8,7 @@
 프로젝트 루트(키트 루트)에서:
 
 ```bash
-python tools_scan/scan_tool.py list photos/3dview.glb
+python tools/scan/scan_tool.py list photos/3dview.glb
 ```
 
 ## 명령
@@ -44,7 +44,7 @@ python tools_scan/scan_tool.py list photos/3dview.glb
 그때는 이렇게 준다:
 
 ```bash
-python tools_scan/scan_tool.py roof photos/3dview.glb --mesh 887188 \
+python tools/scan/scan_tool.py roof photos/3dview.glb --mesh 887188 \
   --axes x,z --shift=-218.38,-506.6,0 --ground 74.51 -o work/scan
 ```
 
@@ -75,7 +75,7 @@ python tools_scan/scan_tool.py roof photos/3dview.glb --mesh 887188 \
 ## compare — 옥상 조형이 맞는지 자동 점검
 
 ```bash
-python tools_scan/scan_tool.py compare photos/3dview.glb --mesh 887188 \
+python tools/scan/scan_tool.py compare photos/3dview.glb --mesh 887188 \
   --axes x,z --shift=-218.38,-506.6,0 --ground 74.51 \
   --model output/<에셋>/_check/<에셋>.obj -o work/scan
 ```
@@ -99,11 +99,11 @@ python tools_scan/scan_tool.py compare photos/3dview.glb --mesh 887188 \
 ## 이 프로젝트(101동)에서 쓴 예
 
 ```bash
-python tools_scan/scan_tool.py report projects/<name>/photos/3dview.glb \
+python tools/scan/scan_tool.py report photos/3dview.glb \
   --mesh 887188 --axes x,z --shift=-218.38,-506.6,0 --ground 74.51 \
-  -o projects/<name>/work/scantest
-python tools_scan/scan_tool.py compare projects/<name>/photos/3dview.glb \
+  -o work/scantest
+python tools/scan/scan_tool.py compare photos/3dview.glb \
   --mesh 887188 --axes x,z --shift=-218.38,-506.6,0 --ground 74.51 \
-  --model projects/<name>/output/<Asset>/_check/<Asset>.obj \
-  -o projects/<name>/work/scantest
+  --model output/<asset>/_check/<asset>.obj \
+  -o work/scantest
 ```

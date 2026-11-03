@@ -30,4 +30,12 @@
 
 일부는 옛 프로젝트의 인자 순서·환경변수를 가정한다. 각 파일 머리의 usage 주석을 먼저 읽는다. 정리된 노하우는 `docs/FACADE_KNOWHOW.md`.
 
-`rail_edges.py` / `rail_plan.py` / `rail_table.py` 는 생성기 파일 경로를 환경변수 `FACADE_GEN`에서 읽는다(절대 경로로 줄 것. 기본값 `generator_cs2.py` 는 `tools_scan/` 기준이라 대개 맞지 않는다).
+`rail_edges.py` / `rail_plan.py` / `rail_table.py` 는 생성기 파일 경로를 환경변수 `FACADE_GEN`에서 읽는다(절대 경로로 줄 것. 기본값 `generator_cs2.py` 는 `tools/scan/` 기준이라 대개 맞지 않는다).
+
+## 2026-11-03 추가·통합
+| 도구 | 용도 |
+|---|---|
+| `pair_ortho.py --frames work/scanframe_<동>.json --dong <동> --blend ...` | 여러 면 일괄 비교 (옛 pairE/pair/pair2/cmp). 파일 형식은 `pair_ortho.py` 맨 위 설명 |
+| `elevstat.py cols\|profile\|runs\|rows` | 정사영 한 장의 가로 창 열·색 클래스 줄·여러 높이 창 구간·창 줄 간격 (옛 wincols/profile/runs/rows) |
+| `elev.py` `scancam.py` `scancam_raw.py` `mgrid.py` `sheet.py` | 스캔 정사영 한 면, 생성기 좌표 원근 렌더 / 스캔 좌표 그대로 원근 렌더, 미터 눈금 크롭, 콘택트 시트 |
+| `rail_edges/plan/table.py` `vsphoto.py` | 활성 프로젝트 생성기를 `_gen.py` 로 찾음(프로젝트 폴더 안 가정 없음) |

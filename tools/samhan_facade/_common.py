@@ -1,4 +1,4 @@
-"""shared settings for facade_tools.
+"""shared settings for tools/samhan_facade.
 Run every tool from the project root (folder with the generator, photos, tools/ and previews/) or set FACADE_ROOT.
 FACADE_GEN = generator module of the type A tower (default: *A_cs2.py found in the project root),
 FACADE_GLB = scan file name in the project root (default 3dview.glb),

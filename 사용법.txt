@@ -162,7 +162,7 @@
  예전 방식(루트에 TASK.md, output 폴더가 있는 구조)으로 작업하던 폴더라면:
      python tools\project.py migrate 건물이름           (옮길 목록만 미리보기)
      python tools\project.py migrate 건물이름 --apply   (실제로 옮기기)
- 한 건물 전용 도구 폴더(facade_tools)도 옮기려면 --facade-tools 를 붙입니다.
+ 한 건물 전용 도구 폴더(tools/samhan_facade)도 옮기려면 --facade-tools 를 붙입니다.
 
 
 --------------------------------------------------------------------

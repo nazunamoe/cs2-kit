@@ -11,7 +11,7 @@ cycle.py — 한 번에: 생성기 실행 → check → 미리보기. 출력은 
   python tools/cycle.py my_building_cs2.py --full          검사 + 사진 + 타일 + LOD 를 한 번에 (보고 전 최종 확인용)
   python tools/cycle.py my_building_cs2.py --full --json   위 결과를 output/<에셋>/_check/gate.json 에 저장
 photo_refs.json 이 있으면 사진 비교(tools/photo_check.py)도 함께 → PHOTO_MISMATCH 줄, previews/photo_check/*.png
---full 은 tools/tile_compare.py 와 tools_local/lod_check.py 도 실행한다(lod_check 는 .blend 필요, 없으면 SKIP).
+--full 은 tools/tile_compare.py 와 tools/qa/lod_check.py 도 실행한다(lod_check 는 .blend 필요, 없으면 SKIP).
 마지막 줄: RESULT PASS|FAIL errors=N warnings=M [photo_mismatch=K] asset=<이름> preview=<경로>
 그 위 GATE 줄: 검사 오류·사진 불일치·LOD 구멍을 합친 요약 (RESULT 의 종료 코드는 예전과 같이 검사 오류만 봄)
 종료 코드: 실행 실패 2, 검사 오류 1, 통과 0
@@ -75,7 +75,7 @@ def main():
     ap.add_argument("--list", type=int, default=3)
     ap.add_argument("--no-render", action="store_true")
     ap.add_argument("--tiles", action="store_true", help="also run tools/tile_compare.py (tile-by-tile detail check vs photos)")
-    ap.add_argument("--full", action="store_true", help="also run tiles + tools_local/lod_check.py and print one GATE line")
+    ap.add_argument("--full", action="store_true", help="also run tiles + tools/qa/lod_check.py and print one GATE line")
     ap.add_argument("--json", nargs="?", const="", default=None, metavar="PATH",
                     help="write every result to one JSON (default: output/<asset>/_check/gate.json)")
     ap.add_argument("--label", default="", help="short step name for the progress image, e.g. windows")
@@ -171,10 +171,10 @@ def main():
     # 6) LOD see-through gate (--full; needs Blender and a .blend)
     lod = dict(checked=False, status="SKIP", line=None, notes=[])
     if a.full:
-        lscript = os.path.join(KIT, "tools_local", "lod_check.py")
+        lscript = os.path.join(KIT, "tools", "qa", "lod_check.py")
         if not os.path.exists(lscript):
-            lod["notes"].append("tools_local/lod_check.py not found")
-            print("[lod] SKIP - tools_local/lod_check.py not found")
+            lod["notes"].append("tools/qa/lod_check.py not found")
+            print("[lod] SKIP - tools/qa/lod_check.py not found")
         else:
             code, log = run([py, lscript, os.path.join(out, asset), "--res", "512"])
             lines_l = [l.strip() for l in log.splitlines() if l.strip()]

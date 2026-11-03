@@ -1,8 +1,10 @@
 # 옥상 난간 조사 5단계: rail_runs.json -> 생성기에 넣을 ROOF_RAILS 표 (106 두 동체 이음매처럼 다른 동체 안에 묻힌 구간은 뺀다)
-# usage: python scripts/rail_table.py work/rail_runs.json > work/roof_rails_table.py
+# usage: python tools/facade/rail_table.py work/rail_runs.json > work/roof_rails_table.py
 import json, sys, math, importlib.util, os
 here = os.path.dirname(os.path.abspath(__file__))
-spec = importlib.util.spec_from_file_location("gen", os.path.join(here, "..", os.environ.get("FACADE_GEN", "generator_cs2.py")))
+sys.path.insert(0, here)
+from _gen import gen_path  # noqa: E402  (활성 프로젝트의 생성기)
+spec = importlib.util.spec_from_file_location("gen", gen_path())
 G = importlib.util.module_from_spec(spec); spec.loader.exec_module(G)
 runs = json.load(open(sys.argv[1]))
 out = {}

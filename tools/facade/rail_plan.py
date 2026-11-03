@@ -1,9 +1,11 @@
 # 옥상 난간 조사: 동마다 평면도 (덩어리 = 회색, 난간 구간 = 빨강, 지금 크림 조각 = 노랑 점선)
-# usage: python scripts/rail_plan.py work/rail_runs.json work/rail_survey.json previews/rail/plan.png
+# usage: python tools/facade/rail_plan.py work/rail_runs.json work/rail_survey.json previews/rail/plan.png
 import json, sys, math, importlib.util, os
 from PIL import Image, ImageDraw
 here = os.path.dirname(os.path.abspath(__file__))
-spec = importlib.util.spec_from_file_location("gen", os.path.join(here, "..", os.environ.get("FACADE_GEN", "generator_cs2.py")))
+sys.path.insert(0, here)
+from _gen import gen_path  # noqa: E402  (활성 프로젝트의 생성기)
+spec = importlib.util.spec_from_file_location("gen", gen_path())
 G = importlib.util.module_from_spec(spec); spec.loader.exec_module(G)
 runs = json.load(open(sys.argv[1])); S = json.load(open(sys.argv[2]))
 K, W, H = 9, 560, 440

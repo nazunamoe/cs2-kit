@@ -20,9 +20,9 @@
   --mesh 이름|번호     메시 선택 (list 로 확인)
 
 예:
-  python tools_scan/scan_tool.py list photos/3dview.glb
-  python tools_scan/scan_tool.py report photos/3dview.glb --mesh 887188 -o work/scan
-  python tools_scan/scan_tool.py compare photos/3dview.glb --mesh 887188 \
+  python tools/scan/scan_tool.py list photos/3dview.glb
+  python tools/scan/scan_tool.py report photos/3dview.glb --mesh 887188 -o work/scan
+  python tools/scan/scan_tool.py compare photos/3dview.glb --mesh 887188 \
          --model output/X/_check/X.obj -o work/scan
 """
 import argparse
