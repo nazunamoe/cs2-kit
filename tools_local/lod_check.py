@@ -86,7 +86,7 @@ def main():
                 gx = [p["xyz"][0] - shift[0], p["xyz"][1] - shift[1], p["xyz"][2]]
                 print(f"      at gen ({gx[0]:.2f}, {gx[1]:.2f}, {gx[2]:.2f})  normal {tuple(p['normal'])}  {p['px']} px  [{p['obj']}]")
     # 텍스처: 게임은 메시 이름으로 <메시>_<맵>.png 를 찾는다. LOD 에 자기 이름의 맵이 없으면 유리처럼(투명) 그려진다
-    # (thebeach 2026-10-31, photos/trans.png: 키트가 LOD1 맵을 안 만들어 중간 거리에서 벽이 비침)
+    # (2026-10-31, photos/trans.png: 키트가 LOD1 맵을 안 만들어 중간 거리에서 벽이 비침)
     adir = os.path.dirname(path)
     for mesh in (name, name + "_LOD1", name + "_LOD2"):
         if not os.path.exists(os.path.join(adir, mesh + ".fbx")):

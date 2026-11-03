@@ -99,11 +99,11 @@ python tools_scan/scan_tool.py compare photos/3dview.glb --mesh 887188 \
 ## 이 프로젝트(101동)에서 쓴 예
 
 ```bash
-python tools_scan/scan_tool.py report projects/sujain_city/photos/3dview.glb \
+python tools_scan/scan_tool.py report projects/<name>/photos/3dview.glb \
   --mesh 887188 --axes x,z --shift=-218.38,-506.6,0 --ground 74.51 \
-  -o projects/sujain_city/work/scantest
-python tools_scan/scan_tool.py compare projects/sujain_city/photos/3dview.glb \
+  -o projects/<name>/work/scantest
+python tools_scan/scan_tool.py compare projects/<name>/photos/3dview.glb \
   --mesh 887188 --axes x,z --shift=-218.38,-506.6,0 --ground 74.51 \
-  --model projects/sujain_city/output/ResidentialHighTower101_L1_7x4/_check/ResidentialHighTower101_L1_7x4.obj \
-  -o projects/sujain_city/work/scantest
+  --model projects/<name>/output/<Asset>/_check/<Asset>.obj \
+  -o projects/<name>/work/scantest
 ```

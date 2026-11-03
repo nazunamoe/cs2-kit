@@ -251,3 +251,11 @@ Blender 가 없으면 생성기를 일반 python 으로 돌려 OBJ·텍스처까
 
 **배포본에서 빠진 것**: `projects/`(건물 작업 폴더), `memory/`(개인 학습 기록 — 템플릿 `templates/memory/` 는 포함),
 `previews/`, `output/`, `capture/out/`(캡처 이미지), `tools/blender_path.txt`(로컬 설치 경로), `__pycache__`.
+
+## 추가 도구: facade_engine (판상·탑상 아파트 공용 생성기)
+- `facade_engine.py`(키트 루트): 높이장 외벽 + zone 표(창·도색 띠·흰 틀·루버) + 저층부 + LOD1/LOD2 + 파라펫·난간. 특정 건물 정보는 없다.
+- 건물 하나 = `<이름>_data.py`(blocks·zones·parts, `tower()` 와 `atlas_extra(A)`) + 6줄짜리 실행기 `<이름>_cs2.py`. 예: `examples/facade_slab_wing_data.py`, `examples/facade_slab_wing_cs2.py`
+  (판상 + 45도 꺾인 동체, 저층부 화강석 띠, 입구, 루버 화면). 틀의 설명은 `facade_engine.py` 맨 위 docstring.
+- 값을 채우는 도구: `tools_scan/facade/` (정사영 렌더, 창 목록, 흰 틀·세로 띠 측정, **스캔|모델 정사영 비교 `pair_ortho.py`**, COPLANAR 진단, 옥상 난간 조사). 사용법은 그 폴더 README.md, 방법·함정은 `docs/FACADE_KNOWHOW.md`.
+- 엔진 옵션: `SASH`(미닫이 2짝), `RAIL_F`(난간 모서리 레일 끝), `canopies` 7번째 항목(재질, 밑면 있는 닫힌 상자), `ROOF_RAILS`/`RAIL_DIM`(옥상 철제 난간).
+- 검증: 건물 한 채(위 예제)를 단일 파일 생성기와 새 구조로 각각 빌드해 tris·창 수가 같음을 확인했다. 다른 건물로의 이식은 아직 안 해 봤다.
