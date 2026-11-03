@@ -12,7 +12,10 @@
   마지막 줄: CMPCAM OK|WARN iou=… scale=… (iou < 0.80 이면 카메라 가정·az·ground 가 틀렸을 수 있음 → --az / --ground 로 고쳐 다시)
 
 주의
-  - angle_deg 0 은 az 180 으로 확인됨(101동). 다른 각도는 az = 180-angle / 180+angle 두 후보 중 실루엣이 더 맞는 쪽을 자동 선택(--az 로 고정 가능).
+  - az 규칙: az = (180 + angle) mod 360 이 101동 8방위 모두 육안으로 확인됨(2026-11-04). 이 도구는 아직 az = 180-angle / 180+angle 두 후보 중
+    실루엣이 더 맞는 쪽을 자동 선택하며, 고른 값이 180+angle 과 다르면 WARN 을 낸다(angle 270 은 반대 면을 골랐었음 -> --az 로 고정).
+    16장 전부를 올바른 az 로 한 번에 보려면 tools/qa/cmp_all.py.
+  - --max-side N : pair/blend 그림의 긴 변을 N px 이하로 저장(토큰 절약, 기본 줄이지 않음).
   - ground = 지면 표고(스캔 좌표 m, 101동 74.51). 건물마다 다르다.
   - 사진이 배경 제거 캡처가 아니면 --no-align (정렬 없이 같은 크기로만 놓는다).
 
@@ -35,6 +38,14 @@ import numpy as np  # noqa: E402
 from PIL import Image  # noqa: E402
 
 CAMSCRIPT = os.path.join(KIT, "tools", "facade", "model_photo_cam.py")
+
+
+def cap(im, max_side):
+    """긴 변이 max_side(>0)보다 길면 줄인다 (토큰 절약용, 기본 꺼짐)."""
+    if not max_side or max(im.size) <= max_side:
+        return im
+    z = max_side / float(max(im.size))
+    return im.resize((max(1, int(im.width * z)), max(1, int(im.height * z))))
 
 
 def blender_exe():
@@ -123,8 +134,8 @@ def frame_mode(a, blend, meta, shot, name):
         pair.paste(A, (0, 0))
         pair.paste(B, (A.width + 10, 0))
         z = min(1.5, 1500.0 / pair.width)
-        pair.resize((int(pair.width * z), int(pair.height * z))).save(os.path.join(od, "pair_%s.png" % nm))
-        Image.blend(A, B, 0.5).resize((int(A.width * z), int(A.height * z))).save(os.path.join(od, "blend_%s.png" % nm))
+        cap(pair.resize((int(pair.width * z), int(pair.height * z))), a.max_side).save(os.path.join(od, "pair_%s.png" % nm))
+        cap(Image.blend(A, B, 0.5).resize((int(A.width * z), int(A.height * z))), a.max_side).save(os.path.join(od, "blend_%s.png" % nm))
     print("CMPCAM %s shot=%s frame cam_gen=(%.1f,%.1f,%.2f) dir=(%.3f,%.3f) iou(bg-differs)=%.3f -> %s" % ("OK" if iou >= 0.5 else "WARN", name, gx, gy, gz, gdx, gdy, iou, od))
 
 
@@ -138,6 +149,7 @@ def main():
     ap.add_argument("--az", type=float, default=None)
     ap.add_argument("--crop", action="append", default=[], help="이름:x0,y0,x1,y1 (사진 픽셀)")
     ap.add_argument("--no-align", action="store_true")
+    ap.add_argument("--max-side", type=int, default=0, help="pair/blend 그림의 긴 변 상한 px (토큰 절약; 기본 0 = 줄이지 않음, 1000 권장)")
     ap.add_argument("--frame", default=None, help="frame_<동>.json (yaw, ox, oy, oz): 틀이 회전된 건물용")
     ap.add_argument("--out", default="work/chk")
     a = ap.parse_args()
@@ -172,6 +184,10 @@ def main():
         if best is None or (iou == iou and iou > best[1]):
             best = (az, iou, out, rx)
     az = best[0]
+    exp = (180.0 + ang) % 360
+    if az % 360 != exp:
+        print("CMPCAM WARN chosen az %g differs from 180+angle=%g (visually confirmed rule on tower 101; at angle 270 this auto-choice picked "
+              "the opposite face). Retry: --az %g, or use cmp_all.py" % (az, exp, exp))
     out = os.path.join(od, "model.png")
     if len(cands) > 1 or best[3] != W:
         render(blend, az, cam_h, dist, fov, W, H, out)
@@ -188,10 +204,11 @@ def main():
         pair.paste(A, (0, 0))
         pair.paste(B, (A.width + 10, 0))
         z = min(1.5, 1500.0 / pair.width)
-        pair.resize((int(pair.width * z), int(pair.height * z))).save(os.path.join(od, "pair_%s.png" % nm))
-        Image.blend(A, B, 0.5).resize((int(A.width * z), int(A.height * z))).save(os.path.join(od, "blend_%s.png" % nm))
+        cap(pair.resize((int(pair.width * z), int(pair.height * z))), a.max_side).save(os.path.join(od, "pair_%s.png" % nm))
+        cap(Image.blend(A, B, 0.5).resize((int(A.width * z), int(A.height * z))), a.max_side).save(os.path.join(od, "blend_%s.png" % nm))
     ok = a.no_align or iou >= 0.80
-    print("CMPCAM %s shot=%s az=%g cam_h=%.1f scale=%.3f iou=%.3f -> %s" % ("OK" if ok else "WARN", name, az, cam_h, s, iou, od))
+    print("CMPCAM %s shot=%s az=%g cam_h=%.1f scale=%.3f iou=%.3f -> %s%s" % ("OK" if ok else "WARN", name, az, cam_h, s, iou, od,
+          ("  AZ_DIFFERS_FROM_180+ANGLE(%g)" % exp) if az % 360 != exp else ""))
 
 
 if __name__ == "__main__":

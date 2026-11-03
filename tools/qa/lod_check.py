@@ -1,4 +1,4 @@
-"""LOD 투명(구멍) 검사 — 게임처럼 뒷면을 그리지 않을 때 메인/LOD1/LOD2 에서 건물 안쪽 뒷면이 비치는 곳
+"""LOD 투명(구멍) 검사 - 게임처럼 뒷면을 그리지 않을 때 메인/LOD1/LOD2 에서 건물 안쪽 뒷면이 비치는 곳
 (앞면이 빠졌거나 뒤집힌 곳 = 게임에서 "투명해 보이는" 곳)을 여러 각도에서 잰다. LOD 는 메인도 막혀 있는 자리만 센다.
 
 검증 도구(tools/qa/). cycle.py 다음에, 보고 전에 매번 돌린다.
@@ -7,6 +7,9 @@
 
 출력: previews/lod_check/<asset>/  (구멍이 보인 각도마다 그림: 회색 = 메인만, 흰색 = LOD 도 있음, 빨강 = 구멍)
 마지막 줄: LODCHECK PASS|FAIL lod1 max X% (az, el) lod2 max Y% ...   기준: 각 각도 구멍 0.05% 이하 = PASS
+
+--quick : 반복 중 빠른 확인용 (방위 8 x 올려다봄/내려다봄 2 = 16시점, 해상도 256). 얇은 틈은 놓칠 수 있다 ->
+          마지막 줄이 `LODCHECK QUICK ok|bad` 로 나오며 **보고용이 아니다**. 보고 전에는 --quick 없이 전체(64시점)를 돌린다.
 """
 import argparse, json, os, subprocess, sys, glob
 
@@ -41,7 +44,10 @@ def main():
     ap.add_argument("--az", type=int, default=16, help="방위각 개수 (기본 16 = 22.5도 간격)")
     ap.add_argument("--elev", default="-10,5,25,50", help="올려다봄(-)·내려다봄(+) 각도들")
     ap.add_argument("--res", type=int, default=512)
+    ap.add_argument("--quick", action="store_true", help="16시점·해상도 256 (반복용; 보고용 아님, 결과 줄이 LODCHECK QUICK)")
     a = ap.parse_args()
+    if a.quick:
+        a.az, a.elev, a.res = 8, "5,50", 256
 
     proj = active_project()
     path = a.asset if os.path.isabs(a.asset) else os.path.join(proj, a.asset)
@@ -96,7 +102,8 @@ def main():
         if miss:
             ok = False
             print(f"  NO_TEXTURE {mesh}: {', '.join(miss)} missing (copy the main maps under this name)")
-    print(f"LODCHECK {'PASS' if ok else 'FAIL'} " + " | ".join(summary) + f"  -> {os.path.relpath(out, proj)}")
+    verdict = ("QUICK " + ("ok" if ok else "bad")) if a.quick else ("PASS" if ok else "FAIL")
+    print(f"LODCHECK {verdict} " + " | ".join(summary) + f"  -> {os.path.relpath(out, proj)}")
 
 
 if __name__ == "__main__":
