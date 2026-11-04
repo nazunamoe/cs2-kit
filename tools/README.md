@@ -11,8 +11,8 @@
 | `tools/facade/` | 입면 측정·비교 (스캔 정사영, 창·띠·난간 측정, VR 카메라 렌더) | `pair_ortho.py`(단일 면, 또는 `--frames` 여러 면 일괄), `elevstat.py cols|profile|runs|rows`, `winlist.py`, `wmask.py`, `model_photo_cam.py`, `scan_photo_cam.py`, `elev.py`, `scancam.py`, `scancam_raw.py`, `rail_edges→rail_survey→rail_decide→rail_table`(활성 프로젝트의 생성기를 `_gen.py` 가 찾음), `vsphoto.py`, `coplanar_diag.py` … README |
 | `tools/samhan_facade/` | 특정 생성기 구조(평면 API `HALF`, `edges_of()`, `floor_z()` …)와 사진 등록부에 묶인 도구. 같은 일을 생성기 없이 하는 공용판 = `tools/facade_paint.py` + `tools/facade/winlist.py` | `refuge_scan.py`, `window_template.py` … README |
 
-## 병렬 검증 (`tools/qa/verify.py`)
-`python tools/qa/verify.py --label <단계>` — `cycle.py --no-render`(빌드+규격 검사)가 통과하면 `lod_check`·미리보기 렌더·`cmp_cam`(프로젝트 `verify.json` 의 사진 목록)·(`photo_refs.json` 이 있으면) `tile_compare`/`photo_check` 를 동시에 돌려 한 번에 요약한다.
+## 통합 검증 (`tools/qa/verify.py`)
+`python tools/qa/verify.py --label <단계>` — 공통 `cycle.py final` gate 를 실행한 뒤, 프로젝트 `verify.json` 에 지정한 same-camera 검사를 병렬로 추가한다. 일반 실행은 strict final 이므로 FBX·LOD·미리보기·사진·타일 결과가 한 gate 에 모인다.
 `verify.json` 예: `{"generator": "x_cs2.py", "ground": 74.51, "shots": [{"photo": "photos/101_side1.png", "meta": "photos/101_meta.json", "crops": {"roof": [1260,300,1760,640]}}]}`
 
 ## 사진과 같은 카메라로 비교 (`tools/qa/cmp_cam.py`)
@@ -21,7 +21,7 @@ meta 카메라(거리·fov·높이)로 에셋 `.blend` 를 렌더해 사진 실�
 ## meta 사진 전부 비교와 점수 기록 (`cmp_all.py`, `scores.py`, `verify.py` 옵션)
 - `python tools/qa/cmp_all.py --asset output/<에셋> --meta photos/<동>_meta.json --ground <지면 표고>` — meta 의 사진 전부를 같은 카메라로 렌더(Blender 1회, `multicam.py`)하고 실루엣 IoU 가 최대가 되게 크기(1±0.1)·위치를 맞춘 뒤, 표(IoU·scale)·사진별 `pair.png`·접촉 시트 `sheet_*.png`(긴 변 1000 px 이하)를 `work/chk_all/` 에 쓴다. 방위는 `az = 180 + angle` (한 건물 8방위를 눈으로 확인한 규칙이므로 다른 캡처는 시트로 먼저 확인, 아니면 `--az-offset`).
 - IoU 는 회귀 감시용이다: 거의 대칭인 건물에서는 반대 면도 비슷하게 나오고 크기 변화는 흡수하며 창·기둥 같은 구조는 못 본다. 시트와 pair 를 눈으로 본다.
-- `verify.py --fast` = 반복용(LOD `--quick`, 미리보기 생략, 끝 줄 `VERIFY FAST` 는 보고용 아님), `--all-shots` = 위 비교 포함. 매번 `work/chk/scores.json` 에 IoU·scale·LOD 최대 구멍·tris 를 쌓고 전보다 나빠지면 `SCORES REGRESS`/`SCALE_CHANGE` 를 낸다.
+- `verify.py --fast` = 공통 quick OBJ/규격 검사(끝 줄 `VERIFY FAST` 는 보고용 아님), `--all-shots` = 위 비교 포함. 매번 `work/chk/scores.json` 에 IoU·scale·LOD 최대 구멍·tris 를 쌓고 전보다 나빠지면 `SCORES REGRESS`/`SCALE_CHANGE` 를 낸다.
 - `lod_check.py --quick` = 16시점·256 px(약 5 s). 얇은 구멍을 놓칠 수 있어 결과 줄이 `LODCHECK QUICK`. `cmp_cam.py --max-side N` = pair/blend 그림 축소(토큰 절약).
 
 ## 여러 면 정사영 비교 (`pair_ortho.py --frames`)

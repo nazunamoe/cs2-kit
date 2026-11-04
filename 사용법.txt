@@ -1,210 +1,73 @@
-﻿====================================================================
-  CS2 건물 에셋 키트 - 사용법 (처음 쓰는 사람용)
-====================================================================
+CS2 건축 에셋 키트 - Claude Code 사용법
+=====================================
 
-이 키트는 Cities: Skylines II 용 한국 건물(아파트, 상가 등) 에셋을
-"사진을 보고 Claude Code 가 자동으로 만들어 주는" 도구 모음입니다.
-사람은 사진과 건물 정보(TASK.md)만 준비하면 됩니다.
+1. 준비
+-------
+Python 3.9+, numpy, Pillow, Blender 5.2를 준비합니다.
+Blender가 없어도 quick/visual은 가능하지만 FBX와 최종 LOD 검사는 불가능합니다.
 
+키트 루트에서:
+  pip install numpy pillow
+  python tools/project.py init
+  python tools/run_blender.py --find
 
---------------------------------------------------------------------
- 0. 준비물 (처음 한 번만)
---------------------------------------------------------------------
- 1) Python 3.9 이상
- 2) 명령 프롬프트에서:   pip install numpy pillow
- 3) Blender (FBX 만들기용. 없어도 OBJ 로 검사는 가능)
- 4) Claude Code
- 5) 이 키트 압축을 원하는 곳에 풀기  (예: D:\cs2_kit)
-    -> 이 폴더를 "키트 루트"라고 부릅니다. 앞으로 모든 작업은 여기서 합니다.
- 6) 키트 루트에서 명령 프롬프트를 열고 아래 두 줄을 실행:
-       python tools\project.py init
-       python tools\run_blender.py --set "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe"
-    (Blender 경로는 내 컴퓨터에 맞게 바꾸세요. 자동으로 찾아지면 두 번째 줄은 생략 가능)
-    init 은 memory 폴더를 만듭니다. 이미 있으면 건드리지 않습니다.
+2. 새 건축물
+-----------
+  python tools/project.py new my-apt
+커튼월이면:
+  python tools/project.py new my-apt --template cw
 
+projects/my-apt/photos/에 사진과 선택적 GLB를 넣습니다.
+TASK.md의 아는 값만 채우고 모르는 값은 비웁니다.
+실제 단지 이름·브랜드는 에셋 이름과 텍스처에 넣지 않습니다.
 
---------------------------------------------------------------------
- 1. 폴더 구조 (이것만 알면 됩니다)
---------------------------------------------------------------------
- 키트 루트\
-   tools\        도구 모음 (건드리지 마세요)
-   cs2kit.py     공통 라이브러리 (건드리지 마세요)
-   templates\    빈 TASK.md 등 양식
-   memory\       Claude 가 배운 것을 쌓아 두는 곳 (지우지 마세요!)
-                   LESSONS.md : 실수/교훈 모음
-                   LOG.md     : 만든 건물 기록
-                   VALUES.md  : 쓸 만한 치수 모음
-   projects\     건물 하나당 폴더 하나
-     내건물\
-       TASK.md        건물 정보 (내가 채움)
-       photos\        사진과 .glb 파일을 여기에 넣음
-       내건물_cs2.py   생성 프로그램 (Claude 가 작성)
-       photo_refs.json 사진 좌표 (Claude 가 작성)
-       output\        결과물 (FBX, 텍스처)   <- 게임에 넣을 파일
-       previews\      미리보기 그림 (진행 과정 포함)
+3. Claude Code 실행
+------------------
+키트 루트에서 Claude Code를 열고:
+  /build
+추가 요청이 있으면:
+  /build 옥상 물탱크 디테일 강조
 
- projects 와 memory 는 키트를 업데이트해도 지워지지 않습니다.
+다른 명령:
+  /resume                 저장된 다음 행동부터 재개
+  /photo-refs             사진 좌표 생성·검증
+  /fix 3층 난간만 수정    범위 수정과 변경 비교
 
+스킬은 모두 같은 tools/agent.py를 사용합니다.
+직접 환경을 확인하려면:
+  python tools/agent.py doctor --project my-apt --json
 
---------------------------------------------------------------------
- 2. 새 건물 만들기 (기본 흐름)
---------------------------------------------------------------------
- [1단계] 건물 폴더 만들기 (키트 루트에서)
-     python tools\project.py new my-apt
-   * 이름은 영어/숫자/-/_ 만 가능. 실제 단지 이름은 쓰지 마세요.
-   * 커튼월(유리벽) 건물이면 끝에 --template cw 를 붙이세요.
-        python tools\project.py new my-apt --template cw
+4. 검증
+-------
+quick  = OBJ와 규격 검사만 빠르게
+visual = 미리보기와 사진 비교
+final  = FBX, 사진, 타일, LOD를 모두 검사
 
- [2단계] 사진 넣기
-   projects\my-apt\photos\ 폴더에 복사합니다.
-   - 로드뷰 사진, 위성(옥상) 사진, 3D 지도 캡처 모두 OK
-   - 파일 이름에 면을 적어 주면 좋습니다:
-        front.jpg(정면)  side_left.jpg  back.jpg  roof.png(옥상/위성)
-   - 하위 폴더로 정리해도 됩니다.
-   - .glb(스캔) 파일도 같은 photos 폴더에 넣으면 됩니다.
-     (크기/형태 측정용으로만 쓰이고, 모델이나 텍스처로는 쓰이지 않습니다.
-      없으면 그냥 사진만으로 진행됩니다.)
+PASS는 요청한 검사 통과, FAIL은 실패, INCOMPLETE는 필수 검사/이미지 확인 누락입니다.
+NOT_CHECKED를 PASS로 해석하지 마세요.
 
- [3단계] TASK.md 채우기
-   projects\my-apt\TASK.md 를 메모장으로 엽니다.
-   항목 이름(영어)은 그대로 두고, 값만 한글로 써도 됩니다.
-   모르는 칸은 비워 두세요. 아래 4번에서 항목별로 설명합니다.
+visual/final 후 미리보기와 표시된 비교 그림을 보고:
+  python tools/agent.py review --project my-apt --status PASS --note "reviewed final images" --json
 
- [4단계] 만들기
-   Claude Code 를 "키트 루트"에서 열고 이렇게 입력:
-        /build
-   추가 요청이 있으면:   /build 옥상 물탱크 디테일 강조
-   Claude 가 사진 분석 -> 모델 제작 -> 검사 -> 사진과 비교까지 알아서 합니다.
-   끝나면 한국어로 보고합니다.
+Stop 훅은 final/fix가 PASS가 아닌 채 끝나면 다음 행동을 알려 줍니다.
 
- [5단계] 결과 확인
-   - 결과 파일:   projects\my-apt\output\(에셋 이름)\   (FBX 와 텍스처)
-   - 미리보기:    projects\my-apt\previews\progress\latest.png (항상 최신 한 장)
-                  같은 폴더의 번호 붙은 그림들이 단계별 기록입니다.
-   - 사진 비교:   projects\my-apt\previews\photo_check\  (사진 | 모델 | 겹침)
-   - 마지막 보고의 "게임에서 확인할 것" 목록은 게임에 넣은 뒤 직접 확인하세요.
+5. 사진
+-------
+모든 사진과 확대를 반복해서 읽지 않고 연락판 → 대표 사진 → 필요한 확대 순서로 봅니다.
+  python tools/agent.py photos --project my-apt --page 0 --page-size 30 --json
 
+확인한 사진은 기록합니다.
+  python tools/agent.py observe --project my-apt --photo photos/front.jpg --side front --note "36 floors" --json
 
---------------------------------------------------------------------
- 3. 이어서 / 고치기 / 여러 건물
---------------------------------------------------------------------
- - 중간에 멈췄을 때 이어서:        /resume
- - 일부만 고치기:                  /fix 3층 발코니 난간을 철제로 바꿔줘
-     (고치기 전 스냅샷을 남기고, 다른 곳이 안 바뀌었는지 비교해 줍니다)
- - 사진 좌표 파일 다시 만들기:     /photo-refs
- - 다른 건물로 전환:               python tools\project.py use 다른건물
- - 건물 목록:                      python tools\project.py list
- - 지금 작업 중인 건물 확인:       python tools\project.py where
-   (모든 도구는 "지금 작업 중인 건물" 폴더에서 일합니다.
-    전환을 깜빡하면 엉뚱한 건물에 쓰이니 헷갈리면 where 로 확인하세요.)
+사용자가 만든 photo_refs.json은 수정하지 않습니다.
 
+6. 결과 위치
+-----------
+output/<에셋>/          FBX와 텍스처
+previews/              미리보기와 사진 비교
+work/agent_state.json  재개용 상태
+work/observations.json 사진 관찰 기록
+STATUS.md              짧은 인수인계
 
---------------------------------------------------------------------
- 4. TASK.md 항목 설명
---------------------------------------------------------------------
- building      만들 건물 설명        예) 창원 15층 구축 판상형 아파트
- name          에셋 이름(영어)       예) ResidentialHighKMyApt01   (밑줄 _ 금지)
- photos        "이 폴더 안" 그대로 두면 됨
- glb           스캔 파일 이름 (있을 때만)
- complex_name  실제 단지 이름 (선택). 웹 조사에만 쓰고 파일/에셋 이름에는
-               절대 쓰지 않습니다. 비우면 조사를 안 합니다.
- region        지역                  예) 창원 의창구 OO동
- built_year    준공 연도             예) 1998
- floors        층수                  예) 15
- refuge_floor  대피층처럼 창이 다른 "특징 층" 번호. 층 번호를 세는 기준이 되어
-               정확도가 크게 올라갑니다. 없으면 비움.
- size_m        크기                  예) 가로 60, 세로 12, 높이 45
- louver        루버(환기 날개창)     없음 / 있음(위치 설명)
- railing       난간                  유리 / 철제 / 혼합(층 범위)
- balcony       발코니                확장형(창으로 막힘) / 비확장(개방) / 혼합
- curtainwall   커튼월                없음 / 있음 / 커튼월룩 + 모듈 폭, 스팬드럴
-               높이, 유리 색, 환기 루버 칸 위치
- window_type   창 종류               미서기창 / 고정창+환기창 / 커튼월형 ...
- known_facts   아는 사실             예) 층당 4세대, 코어 2개, 1층 필로티
- wishes        원하는 것             예) 옥상 물탱크 디테일
- blender_path  Blender 경로
-
- * louver / railing / balcony / curtainwall / window_type 에 적은 값은
-   사진보다 우선합니다. (사진만으로는 루버/난간/커튼월을 헷갈리기 쉬워서)
- * 모르는 칸은 비워 두세요. 비운 칸은 Claude 가 사진으로 판단하고 보고서에
-   "사진으로 판단함"이라고 적습니다.
- * 크기를 모르면 비워도 되지만, 알면 적는 게 가장 정확합니다.
-
-
---------------------------------------------------------------------
- 5. 커튼월(유리벽) 건물일 때
---------------------------------------------------------------------
- - 유리 건물은 반사 때문에 사진으로 창/벽을 읽기 어렵습니다.
- - new 할 때 --template cw 를 쓰고, TASK.md 의 curtainwall 칸에
-   모듈 폭(보통 1.2~1.8m), 스팬드럴(불투명 띠) 높이(보통 0.8~1.0m),
-   유리 색을 적어 주세요. 사진보다 이 값이 우선합니다.
- - 층 수와 전체 모양은 사진에서 읽습니다.
-
-
---------------------------------------------------------------------
- 6. 메모리(memory) 는 무엇인가요?
---------------------------------------------------------------------
- Claude 가 작업하면서 틀렸다가 고친 것, 쓸 만한 치수를 memory 폴더에
- 적어 둡니다. 다음 건물을 만들 때 자동으로 읽어서 같은 실수를 줄입니다.
- - 직접 고쳐도 됩니다 (메모장으로 열기). "이건 하지 마"라고 적어 두면
-   다음 작업부터 지킵니다.
- - 80줄 안으로 짧게 유지하세요. 너무 길어지면 비슷한 것끼리 합치세요.
- - 키트를 업데이트해도 memory 는 지워지지 않습니다.
-
-
---------------------------------------------------------------------
- 7. 키트 업데이트
---------------------------------------------------------------------
- 새 압축 파일을 키트 루트에 "덮어서" 풀면 됩니다.
- projects 와 memory 는 압축 안에 없어서 지워지지 않습니다.
- (혹시 모르니 덮어쓰기 전에 projects, memory 폴더는 복사해 두면 안심)
-
- 예전 방식(루트에 TASK.md, output 폴더가 있는 구조)으로 작업하던 폴더라면:
-     python tools\project.py migrate 건물이름           (옮길 목록만 미리보기)
-     python tools\project.py migrate 건물이름 --apply   (실제로 옮기기)
- 한 건물 전용 도구 폴더(tools/samhan_facade)도 옮기려면 --facade-tools 를 붙입니다.
-
-
---------------------------------------------------------------------
- 8. 자주 겪는 문제
---------------------------------------------------------------------
- Q. "NO FBX - Blender not found" 가 나와요
- A. Blender 경로를 등록하세요:
-      python tools\run_blender.py --set "blender.exe 전체 경로"
-    그래도 안 되면 OBJ 로 진행되고 보고서에 "FBX not made"라고 나옵니다.
-
- Q. Claude 가 영어로 말해요
- A. .claude\settings.json 에 "language": "korean" 이 있는지, CLAUDE.md 가
-    키트 루트에 있는지 확인하세요. 키트 루트에서 Claude Code 를 열어야 합니다.
-
- Q. 결과물이 엉뚱한 폴더에 생겼어요
- A. python tools\project.py where 로 현재 건물을 확인하고,
-    맞는 건물로 use 한 뒤 다시 작업하세요.
-
- Q. 사진 비교에서 PHOTO_MISMATCH 가 나와요
- A. 사진과 모델의 크기/층 수가 다르다는 뜻입니다. Claude 가 자동으로
-    고치며, 나무/원근 때문에 못 고치는 경우는 이유를 보고서에 적습니다.
-
- Q. 3D 지도(VR) 캡처를 써도 되나요?
- A. 네. 다만 위에서 내려다본 사진은 세로가 눌려 보입니다. TASK.md 의
-    floors(층수)와 size_m(크기)을 알면 꼭 적어 주세요.
-
- Q. 사진이 게임 텍스처로 그대로 들어가나요?
- A. 아니요. 사진은 형태를 파악하는 참고용입니다. output 폴더로 복사되지
-    않습니다. 벽 재질은 사진에서 색/무늬만 읽어 새로 만듭니다.
-    (사진 속 단지 이름, 간판, 로고도 쓰지 않습니다.)
-
-
---------------------------------------------------------------------
- 9. 한눈에 보는 명령 모음 (키트 루트에서)
---------------------------------------------------------------------
- python tools\project.py init                 memory 만들기 (처음 한 번)
- python tools\project.py new 이름              새 건물 폴더 만들기
- python tools\project.py new 이름 --template cw   커튼월 건물용
- python tools\project.py use 이름              작업할 건물 바꾸기
- python tools\project.py list                  건물 목록
- python tools\project.py where                 지금 건물 확인
- python tools\project.py migrate 이름 --apply  예전 구조 옮기기
- /build  /resume  /fix  /photo-refs            (Claude Code 안에서 입력)
-
- 자세한 도구 설명은 TOOLS_CLAUDE.md, README.md, INSTALL.md 를 보세요.
+상세한 명령은 TOOLS_CLAUDE.md, 작업 순서는 docs/agent/WORKFLOW.md에 있습니다.
+최종 실제 크기, 창, 알파, 야간 조명, 정면, 입구, 시그니처 등록은 게임에서 확인하세요.

@@ -1,0 +1,23 @@
+{
+  "language": "korean",
+  "permissions": {
+    "allow": [
+      "Bash(python tools/:*)",
+      "Bash(python -m py_compile:*)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/stop_gate.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
