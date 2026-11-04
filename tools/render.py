@@ -38,17 +38,23 @@ PRESET = {"front": (0, 8), "back": (180, 8), "left": (-90, 8), "right": (90, 8),
           "iso3": (145, 22), "iso4": (-145, 22), "top": (0, 89.5), "lod1": (-35, 22), "lod2": (-35, 22)}
 
 
+def _u8(path, mode="RGBA"):
+    return np.asarray(Image.open(path).convert(mode))      # uint8 그대로 (float 변환은 샘플한 픽셀에만)
+
+
 class Tex:
+    """텍스처는 uint8 로 들고, 그릴 때 샘플한 픽셀만 실수로 바꾼다 (4096^2 float 4장 ~1 GB 읽기를 피함)."""
+
     def __init__(self, texdir, asset, lod2, mode):
         name = {"color": "BaseColor", "normal": "Normal", "ctrl": "ControlMask", "emissive": "Emissive"}[mode]
         p = tex_path(texdir, asset, name, lod2) or tex_path(texdir, asset, name)
-        self.img = load_png(p) / 255.0 if p else np.ones((4, 4, 4))
+        self.img = _u8(p) if p else np.full((4, 4, 4), 255, np.uint8)
         bp = tex_path(texdir, asset, "BaseColor", lod2) or tex_path(texdir, asset, "BaseColor")
-        self.alpha = load_png(bp)[..., 3] / 255.0 if bp else np.ones(self.img.shape[:2])
+        self.alpha = _u8(bp)[..., 3] if bp else np.full(self.img.shape[:2], 255, np.uint8)
         npth = tex_path(texdir, asset, "Normal", lod2)
-        self.nrm = load_png(npth, "RGB") / 127.5 - 1 if (npth and mode == "color") else None
+        self.nrm = _u8(npth, "RGB") if (npth and mode == "color") else None
         ep = tex_path(texdir, asset, "Emissive", lod2)
-        self.emis = load_png(ep, "RGB") / 255.0 if ep else None
+        self.emis = _u8(ep, "RGB") if ep else None
         self.H, self.W = self.img.shape[:2]
 
 
@@ -116,12 +122,12 @@ def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=Fa
             px = np.clip((u * tex.W).astype(int), 0, tex.W - 1); py = np.clip(((1 - v) * tex.H).astype(int), 0, tex.H - 1)
             bump = 1.0
             if tex.nrm is not None:
-                nn = tex.nrm[py, px]
+                nn = tex.nrm[py, px] / 127.5 - 1
                 bump = 1 + 0.6 * (nn[..., 0] * 0.4 - nn[..., 1] * 0.5)
-            col = tex.img[py, px][..., :3] * (shade[i] * bump)[..., None]
+            col = tex.img[py, px][..., :3] * (shade[i] * bump / 255.0)[..., None]
             if tex.emis is not None:
-                col = col + tex.emis[py, px] * (1.0 if night else 0.35)
-            m = m & (tex.alpha[py, px] >= 0.5)
+                col = col + tex.emis[py, px] * ((1.0 if night else 0.35) / 255.0)
+            m = m & (tex.alpha[py, px] >= 128)
         upd = m & (dep < sub)
         sub[upd] = dep[upd]
         reg[upd] = col[upd]
@@ -148,6 +154,32 @@ def atlas_view(texdir, asset, man, size):
     return im
 
 
+_CTX = {}
+
+
+def _view_job(arg):
+    """한 뷰를 그린다 (프로세스마다 에셋·텍스처를 한 번만 읽어 재사용)."""
+    (v, yaw, pitch, title), (path, size, zoom, box, night, label, mode) = arg
+    if path not in _CTX:
+        asset, M, texdir, man = load_asset(path)
+        _CTX[path] = dict(asset=asset, M=M, texdir=texdir, man=man, tex={})
+    c = _CTX[path]
+    if v == "atlas":
+        return atlas_view(c["texdir"], c["asset"], c["man"], size)
+    M = c["M"]
+    lod2 = v == "lod2"
+    if lod2 not in c["tex"]:
+        c["tex"][lod2] = Tex(c["texdir"], c["asset"], lod2, mode)
+    tex = c["tex"][lod2]
+    if v == "lod1":
+        parts = [(M.get("lod1"), "s"), (M.get("lod1_win"), "window"), (M.get("lod1_gls"), "glass")]
+    elif lod2:
+        parts = [(M.get("lod2"), "s"), (M.get("lod2_win"), "window")]
+    else:
+        parts = [(M.get("main"), "s"), (M.get("win"), "window"), (M.get("gls"), "glass")]
+    return render(parts, tex, yaw, pitch, size, title, zoom, box, night, label)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("path")
@@ -165,13 +197,11 @@ def main():
     size = tuple(int(s) for s in a.size.lower().split("x"))
     zoom = tuple(float(s) for s in a.zoom.split(",")) if a.zoom else None
     box = tuple(float(s) for s in a.box.split(",")) if a.box else None
-    tex_main = Tex(texdir, asset, False, a.mode)
-    tex_l2 = None
-    ims = []
+    jobs = []
     for v in a.views.split(","):
         v = v.strip()
         if v == "atlas":
-            ims.append(atlas_view(texdir, asset, man, size)); continue
+            jobs.append((v, None, None, None)); continue
         if v in PRESET:
             yaw, pitch = PRESET[v]
         else:
@@ -181,15 +211,21 @@ def main():
                     yaw = float(tok[3:])
                 elif tok.startswith("pitch"):
                     pitch = float(tok[5:])
-        if v == "lod1":
-            parts, tex = [(M.get("lod1"), "s"), (M.get("lod1_win"), "window"), (M.get("lod1_gls"), "glass")], tex_main
-        elif v == "lod2":
-            tex_l2 = tex_l2 or Tex(texdir, asset, True, a.mode)
-            parts, tex = [(M.get("lod2"), "s"), (M.get("lod2_win"), "window")], tex_l2
-        else:
-            parts, tex = [(M.get("main"), "s"), (M.get("win"), "window"), (M.get("gls"), "glass")], tex_main
         title = f"{v}  yaw {yaw:g} pitch {pitch:g}" + (f"  zoom {a.zoom}" if zoom else "")
-        ims.append(render(parts, tex, yaw, pitch, size, title, zoom, box, a.night, not a.nolabel))
+        jobs.append((v, yaw, pitch, title))
+    common = (a.path, size, zoom, box, a.night, not a.nolabel, a.mode)
+    ims = None
+    n_real = sum(1 for j in jobs if j[1] is not None)
+    if n_real >= 2 and os.environ.get("RENDER_SERIAL") != "1":       # 뷰마다 프로세스를 나눠 병렬 (순수 파이썬 래스터라이저)
+        try:
+            from concurrent.futures import ProcessPoolExecutor
+            with ProcessPoolExecutor(max_workers=min(n_real, os.cpu_count() or 2)) as ex:
+                ims = list(ex.map(_view_job, [(j, common) for j in jobs]))
+        except Exception as e:  # noqa
+            print(f"[render] parallel failed ({type(e).__name__}); serial")
+            ims = None
+    if ims is None:
+        ims = [_view_job((j, common)) for j in jobs]
     if a.photo:
         ph = Image.open(a.photo).convert("RGB")
         ph = ph.resize((int(ph.size[0] * size[1] / ph.size[1]), size[1]), Image.LANCZOS)

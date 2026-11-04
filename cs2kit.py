@@ -280,6 +280,287 @@ def corner_post(mb, x, y, sx, sy, size, z0, z1, region="frame"):
 
 
 # =============================================================================
+# 표준 평면 프리셋 + 소켓 장식 (v1, 2026-11 설계안 구현 — 아직 실제 건물로 검증 안 됨)
+# -----------------------------------------------------------------------------
+# BuildingMeta 가 들고 다니는 좌표계 규칙 (모두 이 규칙을 지켜야 서로 맞물림):
+#   - normal_deg: atan2(nx, ny) % 360 식으로 구한 벽의 바깥 법선 방위각.
+#     front(-Y 바깥)=180, back(+Y 바깥)=0, left(-X 바깥)=270, right(+X 바깥)=90.
+#   - ROOF_PERIMETER / FLOOR_RINGS 의 각 링은 위에서 봤을 때 반시계(CCW) 순서로 둔다.
+#     그래야 _wall_from_segment() 가 변마다 바깥쪽 axis/c/s 를 자동으로 맞게 구한다.
+# =============================================================================
+class QualityStage:
+    """장식 디테일 단계. preset_*/attach_* 함수에 공통으로 넘긴다."""
+    FULL = 0            # 원본: 베벨, 음각 홈, 난간 메시 봉+유리 전부
+    SIMPLIFY_RAIL = 1   # 난간을 스트립/알파컷 패널로, 베벨 제거
+    SIMPLIFY_TRIM = 2   # 보조 음각 홈·몰딩 생략, 창틀 단순화
+    LOD_CULL = 3        # 장식 함수는 아무것도 만들지 않음(LOD1/LOD2 박스화용)
+
+
+class BuildingMeta:
+    """preset_* 가 반환하는, attach_*/apply_facade_paint_grid 가 참조하는 건물 매스 메타데이터.
+    월드 좌표를 다시 계산하지 않도록, 장식·도색 함수는 전부 이 안의 값만 읽는다."""
+
+    def __init__(self, mb):
+        self.mb = mb
+        self.WALLS = {}            # wall_id(str) -> dict(axis,c,s,a0,a1,z0,z1,normal_deg,row_z=[...])
+        self.ROOF_PERIMETER = []   # [(x,y), ...] 옥상 외곽 링 (CCW)
+        self.FLOOR_RINGS = {}      # floor_index(int) -> [(x,y), ...] 그 층 슬래브 상단 링 (CCW)
+        self.ENTRANCE_SOCKETS = []  # [{"pos":(x,y), "facing_deg":.., "bay_index":N}]
+        self.CORNER_WALLS = []     # [(wall_id_a, wall_id_b), ...] 커튼월 코너 처리가 필요한 벽 쌍
+
+
+def _wall_from_segment(x0, y0, x1, y1):
+    """ROOF_PERIMETER/FLOOR_RINGS 의 변(x0,y0)->(x1,y1) (축 정렬, CCW 링 전제)에서
+    axbox/paint 가 쓰는 axis/c/s/a0/a1 을 구한다. 바깥 법선 = 진행 방향을 -90도 돌린 것."""
+    dx, dy = x1 - x0, y1 - y0
+    nx, ny = dy, -dx
+    if abs(dy) < 1e-6:          # 가로 변 -> axis 'y' 벽
+        return "y", y0, (1 if ny > 0 else -1), min(x0, x1), max(x0, x1)
+    return "x", x0, (1 if nx > 0 else -1), min(y0, y1), max(y0, y1)
+
+
+def preset_plate_apartment(A, W, D, floors, floor_h, ground_h=4.5, bays=4,
+                            core="back", balcony=True, railing="glass",
+                            paint_main="wall", quality_stage=QualityStage.FULL):
+    """판상형 4베이 주동 매스: 가로 W x 깊이 D 상자, 저층부(ground_h) + floors 개 상층(floor_h).
+    발코니 슬래브(옵션)·후면 계단실 코어까지 만들고, 창·난간 디테일은 attach_*/생성기 쪽 몫으로 남긴다.
+    반환: BuildingMeta (WALLS: front/back/left/right, FLOOR_RINGS, ENTRANCE_SOCKETS 1개)."""
+    mb = MeshBuilder(A)
+    meta = BuildingMeta(mb)
+    z_top = ground_h + floors * floor_h
+    mb.box(-W / 2, W / 2, 0, D, 0, z_top, paint_main, skip=("bottom",))
+    meta.WALLS["front"] = dict(axis="y", c=0, s=-1, a0=-W / 2, a1=W / 2, z0=0, z1=z_top, normal_deg=180.0)
+    meta.WALLS["back"] = dict(axis="y", c=D, s=1, a0=-W / 2, a1=W / 2, z0=0, z1=z_top, normal_deg=0.0)
+    meta.WALLS["left"] = dict(axis="x", c=-W / 2, s=-1, a0=0, a1=D, z0=0, z1=z_top, normal_deg=270.0)
+    meta.WALLS["right"] = dict(axis="x", c=W / 2, s=1, a0=0, a1=D, z0=0, z1=z_top, normal_deg=90.0)
+    row_z = [0.0, ground_h] + [ground_h + f * floor_h for f in range(1, floors + 1)]
+    for w in meta.WALLS.values():
+        w["row_z"] = row_z
+    meta.ROOF_PERIMETER = [(-W / 2, 0), (W / 2, 0), (W / 2, D), (-W / 2, D)]
+    for f in range(floors + 1):
+        meta.FLOOR_RINGS[f] = list(meta.ROOF_PERIMETER)
+    if core == "back":
+        core_w = min(W * 0.3, 6.0)
+        mb.box(-core_w / 2, core_w / 2, D, D + 3.0, 0, z_top, "core", skip=("bottom",))
+    if balcony and quality_stage < QualityStage.LOD_CULL:
+        depth = 1.2
+        for f in range(floors):
+            z0 = ground_h + f * floor_h
+            mb.box(-W / 2 + 1.0, W / 2 - 1.0, -depth, 0, z0, z0 + 0.15, "slab", skip=("top",))
+            # 난간(railing)은 유리/철제 종류에 따라 생성기가 K.paint/K.axbox 로 직접 올린다 (TASK.md railing 규칙).
+    meta.ENTRANCE_SOCKETS.append(dict(pos=(0.0, 0.0), facing_deg=180.0, bay_index=bays // 2))
+    return meta
+
+
+def preset_tower_l_core(A, wing_a, wing_b, floors, floor_h, core_pos="corner",
+                         corner_curtainwall=True, quality_stage=QualityStage.FULL):
+    """타워형 L자 코어 매스. wing_a=(length_x, width_y): 원점에서 +X로 뻗는 날개.
+    wing_b=(length_y, width_x): wing_a 의 +Y 쪽(끝에서 폭 by_w 만큼)에서 +Y로 뻗는 날개(두 날개가
+    (0, ax_w)~(by_w, ax_w) 구간에서 맞물려 L자가 된다). 반환: BuildingMeta.
+    corner_curtainwall=True 면 두 날개가 만나는 바깥 모서리 두 벽을 CORNER_WALLS 에 적어 두고(실제
+    커튼월 메시는 생성기가 K.curtainwall + K.corner_post 로 직접 만든다 — 프리셋은 좌표만 알려준다)."""
+    ax_len, ax_w = wing_a
+    by_len, by_w = wing_b
+    z_top = floors * floor_h
+    mb = MeshBuilder(A)
+    meta = BuildingMeta(mb)
+    mb.box(0, ax_len, 0, ax_w, 0, z_top, "wall", skip=("bottom",))
+    mb.box(0, by_w, ax_w, ax_w + by_len, 0, z_top, "wall", skip=("bottom",))
+    meta.WALLS["wing_a_front"] = dict(axis="y", c=0, s=-1, a0=0, a1=ax_len, z0=0, z1=z_top, normal_deg=180.0)
+    meta.WALLS["wing_a_end"] = dict(axis="x", c=ax_len, s=1, a0=0, a1=ax_w, z0=0, z1=z_top, normal_deg=90.0)
+    meta.WALLS["wing_b_side"] = dict(axis="x", c=0, s=-1, a0=ax_w, a1=ax_w + by_len, z0=0, z1=z_top, normal_deg=270.0)
+    meta.WALLS["wing_b_end"] = dict(axis="y", c=ax_w + by_len, s=1, a0=0, a1=by_w, z0=0, z1=z_top, normal_deg=0.0)
+    row_z = [floor_h * f for f in range(floors + 1)]
+    for w in meta.WALLS.values():
+        w["row_z"] = row_z
+    meta.ROOF_PERIMETER = [(0, 0), (ax_len, 0), (ax_len, ax_w), (by_w, ax_w),
+                            (by_w, ax_w + by_len), (0, ax_w + by_len)]
+    for f in range(floors + 1):
+        meta.FLOOR_RINGS[f] = list(meta.ROOF_PERIMETER)
+    if core_pos == "corner":
+        cw = min(by_w, ax_w)
+        mb.box(0, cw, ax_w - cw, ax_w, 0, z_top, "core", skip=("bottom",))
+    if corner_curtainwall:
+        meta.CORNER_WALLS.append(("wing_a_end", "wing_b_side"))
+    meta.ENTRANCE_SOCKETS.append(dict(pos=(by_w / 2, ax_w / 2), facing_deg=180.0, bay_index=0))
+    return meta
+
+
+def preset_piloti_base(meta, piloti_h, column_grid, lobby_bay, quality_stage=QualityStage.FULL):
+    """기존 BuildingMeta 의 'front'(또는 'wing_a_front') 벽 1층에 필로티 기둥 배열 + 공동현관
+    로비 매스를 덧붙인다. lobby_bay = (a0, a1): 로비가 막는 구간(그 구간엔 기둥을 안 세운다).
+    주의(v1 단순화): 기둥을 벽 앞면 바로 바깥(깊이 column_grid*0 ~ 0.5m)에만 둔다 — 실제 필로티는
+    보통 건물 가장자리에서 더 안쪽으로 들어간 구조이므로, 건물마다 사진으로 실제 기둥 깊이를 확인해야 한다."""
+    front = meta.WALLS.get("front") or meta.WALLS.get("wing_a_front")
+    if front is None:
+        raise ValueError("preset_piloti_base: meta has no 'front' wall")
+    a0, a1 = front["a0"], front["a1"]
+    col_size = 0.5
+    lb0, lb1 = lobby_bay
+    if quality_stage < QualityStage.LOD_CULL:
+        a = a0 + column_grid
+        while a < a1 - 1e-6:
+            if not (lb0 - col_size <= a <= lb1 + col_size):
+                axbox(meta.mb, front["axis"], front["c"], front["s"], a - col_size / 2, a + col_size / 2,
+                      0, col_size, 0, piloti_h, "column")
+            a += column_grid
+    axbox(meta.mb, front["axis"], front["c"], front["s"], lb0, lb1, 0, 2.0, 0, piloti_h, "wall")
+    meta.ENTRANCE_SOCKETS.append(dict(pos=((lb0 + lb1) / 2, 0.0), facing_deg=front["normal_deg"], bay_index=0))
+    return meta
+
+
+def attach_roof_crown(meta, style="parapet_light", height=1.2, quality_stage=QualityStage.FULL):
+    """ROOF_PERIMETER 를 따라 파라펫(+선택적 경관 조명 띠)을 붙인다. style: plain | parapet_light | mechanical_screen."""
+    if quality_stage >= QualityStage.LOD_CULL or not meta.ROOF_PERIMETER:
+        return
+    z_tops = [w["z1"] for w in meta.WALLS.values() if isinstance(w, dict) and "z1" in w]
+    if not z_tops:
+        return
+    z0 = max(z_tops)
+    depth = 0.6 if style == "mechanical_screen" else 0.3
+    ring = meta.ROOF_PERIMETER
+    n = len(ring)
+    for i in range(n):
+        x0, y0 = ring[i]
+        x1, y1 = ring[(i + 1) % n]
+        if math.hypot(x1 - x0, y1 - y0) < 0.5:
+            continue
+        axis, c, s, a0, a1 = _wall_from_segment(x0, y0, x1, y1)
+        axbox(meta.mb, axis, c, s, a0, a1, 0, depth, z0, z0 + min(height, 0.9), "parapet")
+        if quality_stage < QualityStage.SIMPLIFY_TRIM:
+            axbox(meta.mb, axis, c, s, a0, a1, depth * 0.6, depth, z0 + min(height, 0.9),
+                  z0 + min(height, 0.9) + 0.1, "coping")
+        if style == "parapet_light" and quality_stage < QualityStage.SIMPLIFY_RAIL:
+            paint(meta.mb, axis, c, s, a0, a1, z0 + min(height, 0.9) - 0.05, z0 + min(height, 0.9), "light_strip")
+
+
+def attach_cornice_band(meta, target_floors, depth=0.15, height=0.3, quality_stage=QualityStage.FULL):
+    """FLOOR_RINGS[f] 를 따라 돌출 몰딩(코니스) 띠를 붙인다. target_floors = 적용할 층 인덱스 목록."""
+    if quality_stage >= QualityStage.LOD_CULL:
+        return
+    for f in target_floors:
+        ring = meta.FLOOR_RINGS.get(f)
+        if not ring:
+            continue
+        z = None
+        for w in meta.WALLS.values():
+            if isinstance(w, dict) and "row_z" in w and f < len(w["row_z"]):
+                z = w["row_z"][f]
+                break
+        if z is None:
+            continue
+        n = len(ring)
+        for i in range(n):
+            x0, y0 = ring[i]
+            x1, y1 = ring[(i + 1) % n]
+            if math.hypot(x1 - x0, y1 - y0) < 0.3:
+                continue
+            axis, c, s, a0, a1 = _wall_from_segment(x0, y0, x1, y1)
+            axbox(meta.mb, axis, c, s, a0, a1, 0, depth, z, z + height, "cornice")
+
+
+def attach_entrance_canopy(meta, bay_index, style="flat", quality_stage=QualityStage.FULL):
+    """ENTRANCE_SOCKETS[bay_index] 자리에 문주 캐노피를 붙인다(얇은 슬래브 + 기둥, LESSONS 규칙).
+    style: flat(평슬래브) | gable(박공, v1 은 flat 과 동일 - 추후 보강)."""
+    if quality_stage >= QualityStage.LOD_CULL:
+        return
+    if bay_index >= len(meta.ENTRANCE_SOCKETS):
+        raise IndexError("attach_entrance_canopy: no ENTRANCE_SOCKETS[%d]" % bay_index)
+    sock = meta.ENTRANCE_SOCKETS[bay_index]
+    px, py = sock["pos"]
+    rad = math.radians(sock["facing_deg"])
+    ndx, ndy = math.sin(rad), math.cos(rad)   # normal_deg 규약과 맞춘 바깥 방향 단위벡터
+    depth, width = 1.8, 3.0
+    h0, h1 = 3.0, 3.3
+    ex, ey = px + ndx * depth, py + ndy * depth
+    if abs(ndx) > abs(ndy):
+        x0, x1 = sorted((px, ex))
+        y0, y1 = py - width / 2, py + width / 2
+    else:
+        y0, y1 = sorted((py, ey))
+        x0, x1 = px - width / 2, px + width / 2
+    meta.mb.box(x0, x1, y0, y1, h0, h1, "canopy", skip=("bottom",))
+    if quality_stage < QualityStage.SIMPLIFY_TRIM:
+        post = 0.25
+        for cx, cy in ((x0, y0), (x1, y1)):
+            meta.mb.box(cx - post / 2, cx + post / 2, cy - post / 2, cy + post / 2, 0, h0, "canopy", skip=("bottom",))
+
+
+def match_wall_ids(meta, slices, tol_deg=20.0):
+    """glb_slices.py/facade_read.py 가 뽑은 wall_N(normal_deg 보유)을 meta.WALLS 의 이름 있는
+    wall_id 에 각도로 최근접 매칭한다. 반환: {slices_wall_id: meta_wall_id}. tol_deg 넘으면 뺀다."""
+    named = [(k, w["normal_deg"]) for k, w in meta.WALLS.items() if isinstance(w, dict) and "normal_deg" in w]
+    out = {}
+    for sw in slices.get("walls", []):
+        best, best_d = None, 1e9
+        for name, deg in named:
+            d = abs((sw["normal_deg"] - deg + 180) % 360 - 180)
+            if d < best_d:
+                best, best_d = name, d
+        if best is not None and best_d <= tol_deg:
+            out[sw["id"]] = best
+    return out
+
+
+def hex_to_rgb(hexcol):
+    h = hexcol.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _merge_grid_rects(cell_id, rows, cols):
+    """rows x cols 라벨 그리드 -> (r0,r1,c0,c1,label) 사각형 목록(행 단위로 합치는 방식 — 최소
+    개수는 아니지만 서로 안 겹치고 빠르다). r1/c1 은 포함(inclusive) 인덱스."""
+    used = [[False] * cols for _ in range(rows)]
+    rects = []
+    for r in range(rows):
+        c = 0
+        while c < cols:
+            if used[r][c]:
+                c += 1
+                continue
+            label = cell_id[r][c]
+            c2 = c
+            while c2 < cols and not used[r][c2] and cell_id[r][c2] == label:
+                c2 += 1
+            r2 = r
+            while r2 + 1 < rows and all(not used[r2 + 1][k] and cell_id[r2 + 1][k] == label for k in range(c, c2)):
+                r2 += 1
+            for rr in range(r, r2 + 1):
+                for cc in range(c, c2):
+                    used[rr][cc] = True
+            rects.append((r, r2, c, c2 - 1, label))
+            c = c2
+    return rects
+
+
+def apply_facade_paint_grid(mb, atlas, wall_meta, paint_grid, palette, layer_base=1):
+    """band_scan.py 의 paint_grid.json 결과를 벽에 칠한다 (실제 메시 분할이 아니라 K.paint 오버레이 —
+    PROPOSAL_pipeline_v2.md 의 A안). wall_meta: dict(axis,c,s,row_z=[...], col_a=[...]) — row_z/col_a 는
+    그리드 행/열 경계를 실제 z/벽 거리(a)로 준 목록(len = rows+1 / cols+1). palette 의 색은 atlas 에
+    없으면 "paintgrid_<id>" 이름으로 자동 등록한다. 반환: 실제로 칠한 사각형 목록(디버그/보고용)."""
+    row_z, col_a = wall_meta["row_z"], wall_meta["col_a"]
+    rows, cols = paint_grid["rows"], paint_grid["cols"]
+    cell_id = paint_grid["cell_id"]
+    if len(row_z) < rows + 1 or len(col_a) < cols + 1:
+        raise ValueError("apply_facade_paint_grid: row_z/col_a shorter than the grid (rows=%d cols=%d)" % (rows, cols))
+    for key, hexcol in palette.items():
+        name = "paintgrid_%s" % key
+        if name not in atlas.cells:
+            atlas.add(name, color=hex_to_rgb(hexcol))
+    rects = _merge_grid_rects(cell_id, rows, cols)
+    layer = layer_base
+    painted = []
+    for (r0, r1, c0, c1, label) in rects:
+        a0, a1 = col_a[c0], col_a[c1 + 1]
+        z0, z1 = row_z[r0], row_z[r1 + 1]
+        region = "paintgrid_%s" % label
+        paint(mb, wall_meta["axis"], wall_meta["c"], wall_meta["s"], a0, a1, z0, z1, region, layer=layer)
+        painted.append((a0, a1, z0, z1, region, layer))
+        layer += 1
+    return painted
+
+
+# =============================================================================
 # 아틀라스
 # =============================================================================
 class Atlas:
@@ -427,8 +708,8 @@ class Atlas:
             if c["emissive"] is not None:
                 emis[sl] = np.array(c["emissive"], np.float32) * ctx.emis[..., None]
             filled[sl] = True
-        iy, ix = _bleed_index(filled, self.pad)
-        base, ctrl, mask, nrm, emis = (a[iy, ix] for a in (base, ctrl, mask, nrm, emis))
+        for a in (base, ctrl, mask, nrm, emis):
+            _bleed_cells(a, [self.cells[n]["rect"] for n in self.order], self.pad)
         maps = dict(BaseColor=base, ControlMask=ctrl, MaskMap=mask, Normal=nrm, Emissive=emis)
         self._cache = (len(self.order), {k: v.copy() for k, v in maps.items()})
         return self._finish(maps, size)
@@ -445,6 +726,31 @@ class Atlas:
                     a = (v + 1.0) * 127.5
                 maps[key] = a
         return {k: np.clip(v, 0, 255).astype(np.uint8) for k, v in maps.items()}
+
+
+    # ---- 캐시 키: 아틀라스 정의가 같으면 텍스처 렌더·PNG 쓰기를 건너뛴다 (export_asset)
+    def signature(self):
+        """칸 속성 + painter 코드(상수·전역값·클로저 포함) + 사진 파일 내용 + cs2kit 렌더 코드의 해시.
+        painter 안에서 정체를 알 수 없는 객체를 쓰면 None(=항상 다시 그림)."""
+        import hashlib
+        h = hashlib.sha1()
+        h.update(repr((self.size, self.pad)).encode())
+        h.update(_RENDER_SRC_SIG.encode())
+        for n in self.order:
+            c = self.cells[n]
+            for k in sorted(c):
+                v = c[k]
+                if k == "painter":
+                    v = _fn_sig(v) if v else None
+                    if v is None and c[k]:
+                        return None
+                elif k in ("image", "normal_image", "gloss_image") and v:
+                    try:
+                        v = (v, hashlib.sha1(open(v, "rb").read()).hexdigest())
+                    except OSError:
+                        return None
+                h.update(repr((n, k, v)).encode())
+        return h.hexdigest()
 
     def to_json(self):
         self.layout()
@@ -470,7 +776,7 @@ class _CellCtx:
         self.height = np.zeros((h, w), np.float32)       # 노멀맵용 높이 (홈 = 음수)
         self.gloss = np.full((h, w), c["gloss"], np.float32)
         self.emis = np.ones((h, w), np.float32)
-        self.rng = np.random.default_rng(abs(hash(str(c["color"]))) % (2 ** 31))
+        self.rng = np.random.default_rng(zlib.crc32(str(c["color"]).encode()) % (2 ** 31))   # hash() 는 실행마다 달라 crc32 사용
 
     def meters(self):
         """타일 재질: 칸 안 좌표를 미터로 (x 가로, y 세로, 아래 = 0). 변형마다 0 부터."""
@@ -538,6 +844,17 @@ def height_to_normal(h, strength=2.0):
     return np.stack([-gx * nz, -gy * nz, nz], -1) * 127.5 + 127.5
 
 
+def _bleed_cells(arr, rects, pad):
+    """칸 바깥 pad px 를 칸 가장자리 픽셀로 채운다(칸별 clamp, 제자리). 전체 이미지 roll 반복보다 수십 배 빠름.
+    칸 사이 간격이 2*pad 라 서로 겹치지 않는다."""
+    H, W = arr.shape[:2]
+    for x, y, w, h in rects:
+        y0, y1, x0, x1 = max(0, y - pad), min(H, y + h + pad), max(0, x - pad), min(W, x + w + pad)
+        ys = np.clip(np.arange(y0, y1), y, y + h - 1)
+        xs = np.clip(np.arange(x0, x1), x, x + w - 1)
+        arr[y0:y1, x0:x1] = arr[np.ix_(ys, xs)]
+
+
 def _bleed_index(filled, n):
     """칸 바깥 여백 n px 를 가장 가까운 칸 픽셀로 채우기 위한 (행, 열) 인덱스 (한 번만 계산해 모든 맵에 사용)."""
     H, W = filled.shape
@@ -556,6 +873,73 @@ def _bleed_index(filled, n):
                 new |= take
         f = new
     return iy, ix
+
+
+def _fn_sig(fn, _depth=0):
+    """함수의 바이트코드·상수·기본값·클로저 값·참조하는 전역 값으로 만든 문자열. 알 수 없으면 None."""
+    import types
+    if _depth > 4:
+        return None
+    parts = []
+
+    def code_sig(co):
+        out = [co.co_code.hex(), repr(co.co_names), repr(co.co_varnames)]
+        for k in co.co_consts:
+            out.append(code_sig(k) if isinstance(k, types.CodeType) else repr(k))
+        return "|".join(out)
+
+    def val(v):
+        if isinstance(v, (int, float, str, bool, bytes, type(None), tuple, list, dict, set)):
+            r = repr(v)
+        elif isinstance(v, np.ndarray):
+            r = v.tobytes().hex()[:4096] + str(v.shape)
+        elif isinstance(v, types.FunctionType):
+            r = _fn_sig(v, _depth + 1)
+        elif isinstance(v, types.ModuleType) or isinstance(v, type):
+            r = getattr(v, "__name__", "?")
+        elif isinstance(v, np.generic):
+            r = repr(v)
+        else:
+            r = repr(v)
+        return None if (r is None or " at 0x" in r) else r
+
+    f = fn.func if hasattr(fn, "func") else fn           # functools.partial
+    if not isinstance(f, types.FunctionType):
+        return None
+    parts.append(code_sig(f.__code__))
+    for name in f.__code__.co_names:
+        if name in f.__globals__:
+            r = val(f.__globals__[name])
+            if r is None:
+                return None
+            parts.append(name + "=" + r)
+    for d in (f.__defaults__ or ()):
+        r = val(d)
+        if r is None:
+            return None
+        parts.append(r)
+    for cell in (f.__closure__ or ()):
+        try:
+            r = val(cell.cell_contents)
+        except ValueError:
+            r = "empty"
+        if r is None:
+            return None
+        parts.append(r)
+    if hasattr(fn, "args"):
+        parts.append(repr((fn.args, sorted(fn.keywords.items()))))
+    return "\n".join(parts)
+
+
+def _src_sig():
+    import hashlib
+    try:
+        return hashlib.sha1(open(__file__, "rb").read()).hexdigest()
+    except OSError:
+        return str(__import__("time").time_ns())
+
+
+_RENDER_SRC_SIG = _src_sig()
 
 
 def _resize(img, w, h, smooth=False):
@@ -747,12 +1131,34 @@ def export_asset(name_base, level, meshes, atlas, out_root, lod2_tex=1024, lot=N
     os.makedirs(folder, exist_ok=True)
     # 텍스처. 게임은 메시 이름으로 <메시>_<맵>.png 를 찾으므로 LOD1 맵도 같은 내용으로 반드시 있어야 한다.
     # 없으면 LOD1 이 유리처럼 그려져 중간 거리에서 벽이 비친다(lod_check 의 NO_TEXTURE 검사).
-    for suffix, arr in atlas.render().items():
-        path = os.path.join(folder, f"{asset}_{suffix}.png")
-        write_png(path, arr)
-        shutil.copyfile(path, os.path.join(folder, f"{asset}_LOD1_{suffix}.png"))
-    for suffix, arr in atlas.render(size=lod2_tex).items():
-        write_png(os.path.join(folder, f"{asset}_LOD2_{suffix}.png"), arr)
+    # 아틀라스 정의(칸·painter·사진)가 지난번과 같고 PNG 가 다 있으면 렌더·쓰기를 건너뛴다 (기하만 고칠 때 14초 -> 0초).
+    maps = ("BaseColor", "ControlMask", "MaskMap", "Normal", "Emissive")
+    chk0 = os.path.join(folder, "_check")
+    os.makedirs(chk0, exist_ok=True)
+    keyf = os.path.join(chk0, "atlas.key")
+    sig = atlas.signature()
+    key = f"{sig} lod2={lod2_tex}" if sig else None
+    files = [f"{asset}_{m}.png" for m in maps] + [f"{asset}_LOD1_{m}.png" for m in maps] + [f"{asset}_LOD2_{m}.png" for m in maps]
+    cached = False
+    if key and os.path.exists(keyf) and all(os.path.exists(os.path.join(folder, f)) for f in files):
+        try:
+            cached = open(keyf, encoding="utf-8").read().strip() == key
+        except OSError:
+            pass
+    if cached:
+        print("[cs2kit] atlas textures unchanged - reused (cache)")
+    else:
+        if os.path.exists(keyf):
+            os.remove(keyf)
+        for suffix, arr in atlas.render().items():
+            path = os.path.join(folder, f"{asset}_{suffix}.png")
+            write_png(path, arr)
+            shutil.copyfile(path, os.path.join(folder, f"{asset}_LOD1_{suffix}.png"))
+        for suffix, arr in atlas.render(size=lod2_tex).items():
+            write_png(os.path.join(folder, f"{asset}_LOD2_{suffix}.png"), arr)
+        if key:
+            with open(keyf, "w", encoding="utf-8") as f:
+                f.write(key)
     warns = []
     if "_" in name_base:
         warns.append("underscore inside name is not allowed")

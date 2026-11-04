@@ -16,12 +16,19 @@ CS2 한국 건물 에셋을 만들 때 쓰는 도구 모음이다. 모든 명령
 | 사진에서 좌표 읽기 | `sat_grid.py` | `python tools/sat_grid.py grid 사진.jpg -o previews/g.png --step 50` |
 | 사진에서 재질 뽑기 | `extract_texture.py` | `python tools/extract_texture.py 사진.jpg --pts ... --size 3.0x2.9 -o textures_src/stone` |
 | 스캔(.glb)에서 치수 재기 | `glb_measure.py` | `python tools/glb_measure.py scan.glb --list` |
+| 스캔(.glb) 단면에서 벽 세그먼트(각도) 뽑기 (신규, v1) | `tools/glb_slices.py` | `python tools/glb_slices.py scan.glb --z 1.5,15,30` |
 | 사진 한 벽에서 층·창·도색 읽기 (범용) | `tools/facade_paint.py` | `python tools/facade_paint.py all --name front --fh 3.0 --feature-floor 29` |
+| photo_refs 의 벽 전부를 U/V 정규화 좌표로 한 번에 (신규, v1) | `tools/facade_read.py` | `python tools/facade_read.py --refs photo_refs.json` |
+| 벽을 층x열 그리드로 나눠 도색 색 뽑기 (신규, v1) | `tools/band_scan.py` | `python tools/band_scan.py --refs photo_refs.json --name front` |
 | 상세 사진에서 층·도색·창 읽기 (특정 생성기용) | `tools/samhan_facade/*` | `python tools/samhan_facade/refuge_scan.py ...` (사용법: `tools/samhan_facade/README.md`) |
 | 고치기 전/후 비교 | `compare.py` | `snap` → 수정 → `diff` |
 | Blender 찾기·실행·FBX→OBJ | `run_blender.py` | `python tools/run_blender.py --find` |
 
 `put.py` / `edit.py` / `show.py` 는 PowerShell 에서 작은 모델이 파일을 쓰기 위한 도구다. **Claude Code 에서는 쓰지 않는다**(Read/Write/Edit 사용).
+
+**이름 겹침 주의**: `tools/samhan_facade/` 안에도 `glb_slices.py`/`band_scan.py` 가 있다 - 그건 삼한골든뷰
+생성기 구조 전제(`README.md` 의 "생성기 조건")의 **별도 도구**다. 위 표의 `tools/glb_slices.py`,
+`tools/band_scan.py` (키트 루트, 생성기 구조 전제 없음, 4번 절) 와 헷갈리지 않는다.
 
 ## 2. 기본 작업 흐름
 
@@ -66,6 +73,7 @@ python tools/check.py output/<에셋> --list 10 --json report.json --fast --ray 
 오류(✗)는 반드시 0, 경고(!)는 이유를 보고에 적는다. 주요 항목: 이름 규칙, 바닥 z<0, 피벗, LOD1<메인 50%, LOD2≤500 tris,
 같은 평면 겹침, 창 UV(범위·겹침·비율), 창 앞 가림, 텍스처 5종 크기, 텍셀 밀도, 메인 9.5만 tris 초과.
 `--list N` 으로 문제 위치(생성기 좌표)를 N개까지 본다. 좌표는 `manifest.json` 의 `pivot_shift` 로 생성기 좌표에 맞춰져 있다.
+각 에셋 뒤에 기계 판독용 한 줄 `[CS2_AGENT_SUMMARY] {...}` 도 찍는다 - 4번 절 참고.
 
 ### render.py — Blender 없이 미리보기
 ```bash
@@ -177,21 +185,100 @@ python tools/run_blender.py --fbx2obj output/<에셋>        # FBX 만 있을 �
 순서: 환경변수 `BLENDER` → `blender_path.txt` → PATH → Windows 기본 설치 위치 등. Blender 가 없으면 일반 python 으로 실행되어
 OBJ 만 나온다(검사·미리보기는 가능, **FBX 는 안 나옴** → 보고에 "FBX 없음" 적기).
 
-## 4. 생성기를 쓸 때 (cs2kit)
+## 4. 프리셋/소켓 API 전용 모드 (`cs2kit.py` 의 `preset_*`/`attach_*`, 2026-11 설계안 구현, v1)
+
+이 절은 **새 건물**에서 아래 신규 API를 쓰기로 한 경우에만 적용된다. 기존 생성기(`axbox`/`paint`/
+`MeshBuilder.box` 직접 호출)는 그대로 둬도 된다 — 이 절이 그것들을 금지하는 것은 "이 모드를 쓰는
+생성기 안에서" 뿐이다. `docs/PROPOSAL_pipeline_v2.md` 가 전체 설계, 여기는 실제 구현 기준 규칙.
+
+### 4.1 금지 / 필수
+- 건물 **매스**는 반드시 `preset_plate_apartment` / `preset_tower_l_core` (+ 필요하면
+  `preset_piloti_base`) 로 만든다. 프리셋이 못 만드는 특수 지오메트리만 예외로 손으로 만들되, 좌표는
+  `BuildingMeta.WALLS`/`ROOF_PERIMETER`/`FLOOR_RINGS` 에서 읽어 오고 새 월드 좌표를 하드코딩하지 않는다.
+- 장식(파라펫, 코니스, 캐노피)은 `attach_roof_crown` / `attach_cornice_band` / `attach_entrance_canopy`
+  로만 붙인다(월드 좌표 직접 입력 금지 - 소켓/링/벽 레지스트리만 읽는다).
+- 도색은 `tools/band_scan.py` 의 `paint_grid.json` 을 `K.apply_facade_paint_grid()` 로 입힌다.
+  창/층 인식은 `tools/facade_read.py`(내부적으로 `facade_paint.py` 그대로 재사용) 로 한다.
+- 창 소켓은 아직 없다 — `WindowSet.add_face` 를 `meta.WALLS[...]` 의 axis/c/s/a0/a1/row_z 로
+  생성기가 직접 호출한다.
+
+### 4.2 호출 순서
+```python
+meta = preset_plate_apartment(A, ...)            # 또는 preset_tower_l_core(...)
+preset_piloti_base(meta, ...)                    # 저층부가 필로티면
+attach_roof_crown(meta, ...)
+attach_cornice_band(meta, target_floors=[...])
+attach_entrance_canopy(meta, bay_index=0)
+# 창은 meta.WALLS 좌표로 생성기가 WindowSet.add_face 직접 호출
+apply_facade_paint_grid(meta.mb, A, meta.WALLS["front"], paint_grid, palette)
+K.export_asset(NAME, LEVEL, dict(main=meta.mb, lod1=l1, lod2=l2, windows=W), A, ...)
+```
+LOD1/LOD2 는 같은 프리셋/attach 호출을 `quality_stage` 를 바꿔 다시 불러서 만든다(LOD마다
+`BuildingMeta`가 새로 생기므로, 그 `mb` 를 `export_asset` 에 `lod1=`/`lod2=` 로 따로 넘긴다).
+
+### 4.3 `[CS2_AGENT_SUMMARY]` action_tags 대응표
+`python tools/check.py output/<asset>` 가 에셋마다 마지막에 한 줄 찍는다:
+`[CS2_AGENT_SUMMARY] {"status":..,"verts":{"LOD0":..,"LOD1":..,"LOD2":..},"action_tags":[...],"exact_fix_instruction":"..."}`
+
+| action_tag | 뜻 | 고칠 파라미터 |
+|---|---|---|
+| `APPLY_STAGE_1` | main tris 가 50000 의 1~15% 더 큼 | 모든 `preset_*`/`attach_*` 호출의 `quality_stage` 를 현재값+1 |
+| `APPLY_STAGE_2` | 15% 이상 더 큼 | `quality_stage=2`, bay 수·반복 디테일 밀도도 줄이기 |
+| `APPLY_STAGE_3_LOD_CULL` | LOD1(메인의 50%↑) 또는 LOD2(500 tris↑) 한도 초과 | 그 LOD 빌드에서 `quality_stage=3` (attach_* 가 자동으로 아무것도 안 만듦) |
+| `CLAMP_UV` | `ATLAS_UV`/`WIN_UV` 에러 | custom quad UV를 `A.uv_full`/`A.uv_tile` 로 교체 |
+| `MERGE_VERTICES` | 축퇴 면 경고 | 같은 `preset_*`/`attach_*` 호출이 루프 들여쓰기 등으로 중복되는지 확인 |
+
+`exact_fix_instruction` 은 `tools/check.py` 의 `_FIX_TEXT` 와 같은 내용이다 - 코드가 먼저 바뀌면
+이 표도 같이 고친다.
+
+### 4.4 Few-shot 예제
+```python
+import cs2kit as K
+
+A = K.Atlas()
+for n, c in [("wall", (210, 208, 205)), ("core", (190, 190, 190)), ("slab", (160, 160, 160)),
+             ("parapet", (170, 170, 170)), ("coping", (180, 180, 180)), ("light_strip", (255, 250, 210)),
+             ("cornice", (175, 175, 175)), ("canopy", (170, 170, 170))]:
+    A.add(n, color=c, emissive=(255, 250, 210) if n == "light_strip" else None)
+
+# 판상형
+meta = K.preset_plate_apartment(A, W=42.0, D=16.0, floors=15, floor_h=2.9, ground_h=4.5, bays=4)
+K.attach_roof_crown(meta, style="parapet_light", height=1.2)
+K.attach_cornice_band(meta, target_floors=[5, 10])
+K.attach_entrance_canopy(meta, bay_index=0)
+K.export_asset("ResidentialHighPlateXXXX01", 1, dict(main=meta.mb), A, K.out_dir_from_argv("output"))
+
+# 타워형(L자 코어)
+meta2 = K.preset_tower_l_core(A, wing_a=(30.0, 14.0), wing_b=(20.0, 12.0), floors=36, floor_h=2.82,
+                               corner_curtainwall=True)
+K.attach_roof_crown(meta2, style="mechanical_screen", height=2.0)
+K.attach_cornice_band(meta2, target_floors=[10, 20, 30])
+# meta2.CORNER_WALLS 의 두 벽은 생성기가 K.curtainwall + K.corner_post 로 직접 닫는다(프리셋이 못 만듦)
+```
+
+### 4.5 v1 한계 (아직 안 된 것)
+- `preset_piloti_base` 의 기둥 깊이는 단순화(벽 바로 바깥 0~0.5 m) - 건물마다 사진으로 확인해야 한다.
+- `tools/facade_read.py`/`tools/band_scan.py` 는 실제 사진으로 미검증(합성 이미지로만 실행 확인).
+  색 클러스터링 결과를 생성기 표로 옮기기 전에 `previews/paint_grid/*.json` 을 사진과 눈으로 대조한다.
+- `apply_facade_paint_grid` 는 색만 다른 "페인트 오버레이"만 만든다. 실제 요철이 필요한 경계는
+  여전히 `K.axbox` 로 따로 만든다.
+
+## 5. 생성기를 쓸 때 (cs2kit, 일반)
 
 - 생성기 파일 이름: `<에셋이름>_cs2.py`, 에셋 이름에 밑줄 금지, 폴더/파일은 영어.
 - `import cs2kit as K` 로 `MeshBuilder`(박스·면·창), `Atlas`(텍스처 칸), `WindowSet`(창), `export_asset`(FBX·OBJ·PNG·manifest)를 쓴다.
   LOD2 용 빌더는 `K.MeshBuilder(A, split_tiles=False)`.
-- `cs2kit.py` 는 읽어도 되지만 **고치지 않는다**. 모자란 기능은 생성기 안에 헬퍼로 만든다.
+- `cs2kit.py` 는 읽어도 되지만 **고치지 않는다**. 모자란 기능은 생성기 안에 헬퍼로 만든다(4번 절의
+  `preset_*`/`attach_*` 는 이미 `cs2kit.py` 에 들어 있는 공식 API라 이 규칙의 예외가 아니라 그 자체다).
 - 규격(1단위=1m, 피벗 바닥 중앙, 정면=-Y, 메인은 재질 1개, `_Win`/`_Gls` 는 재질 없음, 창 UV 는 5x5 격자 등)은 `AGENTS.md` 의 CS2 facts 를 따른다.
 
-## 5. 자주 나는 문제
+## 6. 자주 나는 문제
 
 | 증상 | 원인 / 해결 |
 |---|---|
 | `NO FBX - Blender not found` | Blender 경로 못 찾음 → `python tools/run_blender.py --set "<경로>"` |
 | `--box -11,...` 가 옵션 오류 | 음수 때문 → `--box=-11,11,...` 처럼 `=` 로 붙인다 |
-| LOD2 가 500 tris 초과 | LOD2 빌더를 `split_tiles=False` 로 |
+| LOD2 가 500 tris 초과 | LOD2 빌더를 `split_tiles=False` 로 (또는 4번 절: `quality_stage=3`) |
 | 창 앞 가림 오류 | 창 앞에 난간·루버·발코니가 막음 → `--list` 의 좌표 확인 후 간격 띄우기 |
 | PHOTO_MISMATCH floor pitch | 층수·층고가 사진과 다름 → 메시지가 "더 많은/적은 층"이라고 알려 준다 |
 | 사진 시트에서 사진이 비뚤어짐 | `photo_refs.json` 모서리 좌표가 틀림 → `sat_grid.py grid` 로 다시 읽는다 |
