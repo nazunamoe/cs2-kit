@@ -4,7 +4,7 @@ building: (예: 창원 15층 구축 판상형 아파트 / 쇼핑몰 / 사진 없
 name: (예: ResidentialHighKMyApt01 - 밑줄(_) 금지, 영문. 비우면 모델이 정함)
 photos: 이 폴더 안 (front.jpg, side_left.jpg, roof.png 처럼 이름 붙이기)
 glb: (선택 - 스캔 파일 이름, 예: complex.glb. 크기·형태 참고용으로만 씀)
-# 선택이지만 있으면 가장 좋음: photo_refs.json 을 직접 채우면(photo_refs.example.json 복사) 매번 사진과 비교함. 비워 두면 Claude Code 가 직접 만듦
+# 선택이지만 있으면 가장 좋음: photo_refs.json 을 직접 채우면(photo_refs.example.json 복사) 매번 사진과 비교함. 비워 두면 이미지를 볼 수 있는 에이전트가 직접 만듦
 complex_name: (선택 - 실제 단지/건물 이름. 웹 조사에만 쓰고 파일·에셋 이름에는 절대 안 씀. 비우면 조사 안 함)
 region: (선택 - 예: 창원 의창구 OO동 / 서울 송파구)
 built_year: (선택 - 예: 1998. 비우면 조사로 찾음)

@@ -423,7 +423,7 @@ _FIX_TEXT = {
 
 def agent_summary(r):
     """r = check_asset() 의 반환값. action_tags 는 [CS2_AGENT_SUMMARY] 로 호출 에이전트에게
-    기계적으로 파싱 가능한 한 줄 JSON 으로 내보낸다 (TOOLS_CLAUDE.md 의 대응표와 _FIX_TEXT 가 같은 내용)."""
+    기계적으로 파싱 가능한 한 줄 JSON 으로 내보낸다 (TOOLS.md 의 대응표와 _FIX_TEXT 가 같은 내용)."""
     i = r["info"]
     err_keys = {e["key"] for e in r["errors"]}
     warn_keys = {w["key"] for w in r["warnings"]}
