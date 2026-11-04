@@ -1,135 +1,134 @@
-# CS2 Korean building asset kit — Codex / Kimi Code
+# CS2 건축 에셋 키트 — Codex / Kimi Code
 
-사진과 건축 정보를 바탕으로 Cities: Skylines II 건축 에셋 생성기를 만드는 키트입니다. `cs2kit`는 형상·아틀라스·창·LOD·납출을 담당하고, `tools/`는 반복 빌드와 검증을 담당합니다.
+사진과 건축 정보로 Cities: Skylines II 건축 에셋을 만드는 키트입니다. 이 브랜치는 **Codex와 Kimi Code가 공통으로 사용하는 `AGENTS.md`와 JSON 실행 엔진**을 제공합니다.
 
-## 구조
+## 1. 준비
 
-```text
-AGENTS.md                 Codex/Kimi 자동 작업 규칙 (짧은 공통 규칙)
-TOOLS.md                  필요할 때 읽는 도구/API 설명
-docs/agent/WORKFLOW.md    빌드·검증·재개·부분 수정 절차
-docs/agent/MODELING.md    상세 입면·사진·재질 규칙
-docs/agent/MEMORY.md      전역 기억과 프로젝트 관찰값의 구분
-cs2kit.py                 공통 생성 라이브러리
-projects/<name>/          TASK.md, STATUS.md, photos, generator, output, previews, work
-memory/                   재사용 가능한 절차와 기본값 (프로젝트 전용 색상/좌표 금지)
-templates/                새 프로젝트 양식
-tools/agent.py            모든 CLI가 공유하는 JSON 실행 엔진
-tools/cycle.py            quick/visual/final 공통 게이트
-```
+필요한 환경:
 
-## 설치와 시작
+- Python 3.9 이상
+- `numpy`, `Pillow`
+- Blender 5.2 — FBX 생성과 최종 LOD 검사에 필요
 
-Python 3.9+, numpy, Pillow가 필요합니다. FBX와 LOD 검사에는 Blender 5.2가 필요합니다.
+키트 루트에서 설치와 초기 설정을 실행합니다.
 
 ```bash
 pip install numpy pillow
 python tools/project.py init
 python tools/run_blender.py --find
-python tools/project.py new my-apt
-# curtain wall이면: python tools/project.py new my-apt --template cw
 ```
 
-`projects/my-apt/photos/`에 참고 사진과 선택적 GLB를 넣고 `TASK.md`를 채웁니다. 모르는 값은 비워 둡니다. 에셋 이름과 텍스처에는 실제 단지·브랜드 이름을 쓰지 않습니다.
+Blender를 자동으로 찾지 못하면 `INSTALL.md`의 수동 경로 설정을 참고하세요.
 
-Codex 또는 Kimi Code를 키트 루트에서 열고 `AGENTS.md`를 따르게 합니다. 모든 에이전트 명령은 프로젝트를 명시합니다.
+## 2. 새 프로젝트 만들기
+
+```bash
+python tools/project.py new my-apt
+# 커튼월 건축물:
+python tools/project.py new my-apt --template cw
+```
+
+이제 `projects/my-apt/`에서 다음을 준비합니다.
+
+1. `photos/`에 참고 사진과 선택적 GLB를 넣습니다.
+2. `TASK.md`에 아는 정보를 적고, 모르는 값은 비워 둡니다.
+3. 실제 단지 이름·브랜드·로고는 에셋 이름과 텍스처에 사용하지 않습니다.
+
+## 3. Codex / Kimi Code로 실행
+
+키트 루트에서 Codex 또는 Kimi Code를 엽니다. `AGENTS.md`의 작업 규칙을 따르게 하고, 첫 환경 점검을 실행합니다.
 
 ```bash
 python tools/agent.py doctor --project my-apt --json
-python tools/agent.py cycle --project my-apt --generator my_apt_cs2.py --mode quick --label mass --json
 ```
 
-## 세 가지 검증 모드
+첫 요청 예시:
 
-| 모드 | 수행 내용 | 사용 시점 |
+```text
+AGENTS.md와 projects/my-apt/TASK.md를 읽고 프로젝트를 만들어줘.
+tools/agent.py의 next_action을 따라 quick/visual/final 검증을 진행하고,
+최종 gate와 이미지 review가 PASS일 때만 완료 보고를 해줘.
+```
+
+모든 에이전트 명령은 `--project`를 명시합니다. `projects/.current`에 의존하지 않으므로 여러 세션에서도 작업 대상을 명확히 유지할 수 있습니다.
+
+## 4. 검증과 완료 기준
+
+| 모드 | 검증 내용 | 사용 시점 |
 |---|---|---|
-| `quick` | 일반 Python OBJ + 규격/형상 검사 | 문법·좌표·겹침 수정 반복 |
-| `visual` | OBJ + 미리보기 + 사진 비교 | 매스·창·입면·재질 변경 후 |
-| `final` | Blender FBX + 사진+타일+LOD+strict gate | 최종 보고·부분 수정 완료 전 |
+| `quick` | OBJ 생성, 규격·형상 검사 | 문법·좌표·겹침 수정 반복 |
+| `visual` | 미리보기, 사진 비교 | 매스·창·입면·재질 변경 후 |
+| `final` | FBX, 사진·타일·LOD, strict gate | 최종 보고와 부분 수정 완료 전 |
 
 ```bash
+python tools/agent.py cycle --project my-apt --generator my_apt_cs2.py --mode quick --label mass --json
 python tools/agent.py cycle --project my-apt --generator my_apt_cs2.py --mode visual --label windows --json
 python tools/agent.py cycle --project my-apt --generator my_apt_cs2.py --mode final --label final --json
 ```
+
+결과 상태:
 
 - `PASS`: 요청한 검사가 모두 통과했습니다.
 - `FAIL`: 실행된 검사가 실패했습니다.
 - `INCOMPLETE`: 필수 검사나 이미지 확인이 아직 없습니다.
 - `NOT_APPLICABLE`: `photo_refs.json`이 없어 사진 검사 대상이 아닙니다.
-- `NOT_CHECKED`: 검증하지 않은 상태이며 PASS로 해석하면 안 됩니다.
+- `NOT_CHECKED`: 아직 검증하지 않았으며 PASS로 해석하면 안 됩니다.
 
-visual/final 후에는 현재 미리보기와 표시된 비교 그림을 보고 기록합니다.
+JSON의 `next_action`을 따르고, 상세 로그는 지정된 파일이 필요할 때만 읽습니다. visual/final 후에는 현재 미리보기와 표시된 비교 이미지를 확인하고 결과를 기록합니다.
 
 ```bash
 python tools/agent.py review --project my-apt --status PASS --note "reviewed final images" --json
 ```
 
-## 사진과 토큰 사용
+이미지 입력이 없는 모델은 본 것처럼 기록하지 않고, 제공된 `photo_refs.json`과 수치 데이터를 사용합니다.
 
-모든 사진을 원본과 확대본으로 반복해서 읽지 않습니다. 연락판을 페이지 단위로 보고 대표 사진과 불확실한 부분만 선택합니다.
+## 5. 사진, 결과, 재개
+
+사진은 연락판 페이지 → 대표 사진 → 필요한 영역 확대 순서로 확인합니다. 관찰한 사진은 해시로 기록해 같은 이미지를 반복해서 읽지 않습니다.
 
 ```bash
 python tools/agent.py photos --project my-apt --page 0 --page-size 30 --json
-python tools/agent.py observe --project my-apt --photo photos/front.jpg --side front --note "36 rows; left bays hidden" --json
+python tools/agent.py observe --project my-apt --photo photos/front.jpg --side front --note "36 floors" --json
 ```
 
-관찰값은 `work/observations.json`, 사진 해시는 `work/photo_manifest.json`에 저장됩니다. 자동 인식 결과는 실제 사진의 나무·그림자·원근 때문에 틀릴 수 있으므로 표시된 비교 그림을 확인합니다.
+주요 파일:
 
-## 재개와 부분 수정
+- `output/<에셋>/`: FBX와 텍스처
+- `previews/`: 미리보기와 사진 비교
+- `work/agent_state.json`: 마지막 검증, 생성기 해시, 다음 행동
+- `work/observations.json`: 사진 관찰 기록
+- `STATUS.md`: 짧은 인수인계 요약
 
-`work/agent_state.json`에는 생성기 해시, 마지막 gate, 다음 행동, mismatch 재시도, visual review가 저장됩니다. `STATUS.md`는 짧은 인수인계 요약입니다.
+재개와 부분 수정:
 
 ```bash
 python tools/agent.py resume --project my-apt --json
-```
-
-부분 수정은 변경 전 스냅샷을 만들고, 완료 시 final gate와 변경 범위 비교를 함께 실행합니다.
-
-```bash
 python tools/agent.py fix --project my-apt --generator my_apt_cs2.py --request "change only entrance railing" --box=-5,5,-1,1,0,6 --json
-# 반환된 next_action에 따라 수정 후:
 python tools/agent.py fix --project my-apt --generator my_apt_cs2.py --finish --json
 ```
 
-## 생성기 기본 형태
+부분 수정 완료 시 final gate와 outside-scope 비교를 함께 실행합니다. 하나라도 실패하면 PASS로 보고하지 않습니다.
 
-1 unit = 1 m, 지면 z=0, 정면=-Y입니다.
+## 6. 생성과 편집 규칙
 
-```python
-import cs2kit as K
-A = K.Atlas(size=4096, pad=16)
-A.add("wall", color=(180,180,180), ctrl=(0,0,0), px=256, tile=(3.0,2.9))
-mb = K.MeshBuilder(A)
-mb.box(x0,x1,y0,y1,z0,z1,"wall",skip=("bottom",))
-K.axbox(mb,"y",0,-1,a0,a1,0,0.2,z0,z1,"frame")
-W = K.WindowSet(); W.add_face("y",0,-1,a0,a1,z0,z1,floor=f,unit=u)
-l2 = K.MeshBuilder(A, split_tiles=False)
-K.export_asset(NAME,LEVEL,dict(main=mb,lod1=l1,lod2=l2,gls=g,lod1_gls=g1,windows=W),A,K.out_dir_from_argv("output"))
-```
+- 1 unit = 1 m, 지면 `z=0`, 정면은 `-Y`입니다.
+- 생성기는 `import cs2kit as K`로 `Atlas`, `MeshBuilder`, `WindowSet`, `export_asset`을 사용합니다.
+- LOD1은 main의 50% 미만, LOD2는 500 tris 이하입니다.
+- main은 30k–60k tris를 목표로 하며 95k 초과는 경고입니다.
+- 삼각형 수를 줄이기 위해 실제 층수, bay, 창 위치를 바꾸지 않습니다.
+- 네이티브 Edit/apply_patch를 우선 사용하고, 셸 문자열로 소스를 조합하지 않습니다.
+- 코드·YAML 키·도구 출력·파일 이름은 ASCII를 사용합니다.
 
-LOD1은 main의 50% 미만, LOD2는 500 tris 이하입니다. main은 30k-60k를 목표로 하고 95k 초과는 경고입니다. 삼각형 수를 줄이기 위해 실제 층수·bay·창 위치를 바꾸지 않습니다.
+Windows에서는 PowerShell 7과 UTF-8을 권장합니다. 네이티브 편집이 반복해서 실패할 때만 [PowerShell 편집 fallback](docs/agent/POWERSHELL.md)을 사용합니다.
 
-## 도구 지도
+## 7. 더 보기
 
-- `check.py`: OBJ/PNG 규격·겹침·창·UV·LOD 검사
-- `render.py`: Blender 없이 미리보기
-- `photo_check.py`: 크기·비율·층간 비교
-- `tile_compare.py`: 세부 선·색 비교, 점수는 참고용
-- `sat_grid.py`: 사진 좌표·축척
-- `extract_texture.py`: 사진에서 반복 재질 추출
-- `facade_paint.py`, `facade_read.py`, `band_scan.py`: 층·창·도색 보조 인식
-- `glb_measure.py`, `glb_slices.py`: 스캔 측정 전용
-- `compare.py`: 수정 전후 변경 범위 비교
-- `tools/qa/verify.py`: 공통 gate + 선택적 same-camera 회귀 검사
-- `tools/facade/`, `tools/scan/`: 추가 측정·비교 도구, 각 README 참조
-- `tools/samhan_facade/`: 특정 기존 생성기 전용, 새 건축물에 그대로 사용 금지
-
-자세한 명령과 preset/socket v1 API는 `TOOLS.md`에 있습니다.
-
-## Windows와 작은 로컬 모델
-
-가능하면 PowerShell 7과 UTF-8을 사용합니다. 코드·YAML 키·도구 출력·파일 이름은 ASCII를 유지합니다. 네이티브 편집 도구가 있으면 사용하고, 반복 실패할 때만 `docs/agent/POWERSHELL.md`의 `put.py/edit.py` 방식을 씁니다. 셸 문자열로 소스를 조합하지 않습니다.
+- [설치와 업그레이드](INSTALL.md)
+- [전체 작업 절차](docs/agent/WORKFLOW.md)
+- [도구와 API](TOOLS.md)
+- [상세 모델링 지침](docs/agent/MODELING.md)
+- [메모리 범위](docs/agent/MEMORY.md)
 
 ## 알려진 한계
 
-미리보기는 단순 정사영 렌더라 게임 색·밝기와 다릅니다. 창 가림은 세 지점을 표본 검사합니다. 사진 지표는 가림과 조명에 취약합니다. `facade_read.py`와 `band_scan.py`는 v1이며 실제 사진 확인이 필요합니다. FBX와 LOD는 Blender 없이 완료할 수 없고, 최종 크기·야간·알파·입구·시그니처 등록은 게임에서 확인해야 합니다.
+미리보기는 단순 정사영 렌더라 게임의 색·밝기와 다릅니다. 사진 지표는 나무·그림자·원근에 취약하며, `facade_read.py`와 `band_scan.py`는 실제 사진 확인이 필요한 v1입니다. FBX와 LOD는 Blender 없이 완료할 수 없습니다. 최종 크기, 창, 알파, 야간 조명, 정면, 입구, 시그니처 등록은 게임에서 확인하세요.
