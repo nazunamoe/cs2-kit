@@ -1,20 +1,12 @@
 # -*- coding: utf-8 -*-
-"""
-cycle.py — 한 번에: 생성기 실행 → check → 미리보기. 출력은 짧게 (작은 모델·에이전트용)
+"""Shared build/check/render/photo/LOD gate.
 
-  python tools/cycle.py my_building_cs2.py --label windows   생성 + 검사 + 미리보기
-      previews/<에셋>.png                         최신 (위에 #번호·시각·PASS/FAIL·label 띠)
-      previews/progress/latest.png                항상 같은 파일 = 최신 (이미지 뷰어로 열어 두기)
-      previews/progress/<에셋>/NNN_HHMMSS_label.png  실행할 때마다 쌓이는 진행 기록
-  python tools/cycle.py my_building_cs2.py --no-render     생성 + 검사만 (이미지 없음)
-  python tools/cycle.py my_building_cs2.py --views front,iso --list 3
-  python tools/cycle.py my_building_cs2.py --full          검사 + 사진 + 타일 + LOD 를 한 번에 (보고 전 최종 확인용)
-  python tools/cycle.py my_building_cs2.py --full --json   위 결과를 output/<에셋>/_check/gate.json 에 저장
-photo_refs.json 이 있으면 사진 비교(tools/photo_check.py)도 함께 → PHOTO_MISMATCH 줄, previews/photo_check/*.png
---full 은 tools/tile_compare.py 와 tools/qa/lod_check.py 도 실행한다(lod_check 는 .blend 필요, 없으면 SKIP).
-마지막 줄: RESULT PASS|FAIL errors=N warnings=M [photo_mismatch=K] asset=<이름> preview=<경로>
-그 위 GATE 줄: 검사 오류·사진 불일치·LOD 구멍을 합친 요약 (RESULT 의 종료 코드는 예전과 같이 검사 오류만 봄)
-종료 코드: 실행 실패 2, 검사 오류 1, 통과 0
+Modes: quick = OBJ + geometry checks; visual = OBJ + preview + photo checks;
+final = FBX + preview + photo + tiles + LOD + strict JSON gate.
+Legacy --no-render/--tiles/--full options remain accepted.
+PASS applies only to checks that ran. NOT_CHECKED is not PASS; NOT_APPLICABLE means no photo refs exist.
+Strict exit codes: 0 PASS, 1 FAIL, 2 INCOMPLETE. Non-strict RESULT keeps the legacy geometry-only meaning.
+Use tools/agent.py for compact next_action JSON, resume state, and visual-review recording.
 """
 import argparse
 import json
@@ -31,6 +23,7 @@ except Exception:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 from proj import ROOT, KIT, NAME  # noqa: E402,F401
+from check import agent_summary  # noqa: E402
 
 
 def run(cmd):
@@ -79,12 +72,26 @@ def main():
     ap.add_argument("--json", nargs="?", const="", default=None, metavar="PATH",
                     help="write every result to one JSON (default: output/<asset>/_check/gate.json)")
     ap.add_argument("--label", default="", help="short step name for the progress image, e.g. windows")
+    ap.add_argument("--mode", choices=("quick", "visual", "final"), help="quick=OBJ/check, visual=OBJ/render/photo, final=FBX/full checks")
+    ap.add_argument("--strict", action="store_true", help="fail or mark incomplete when a required final check did not run")
     a = ap.parse_args()
+    mode = a.mode or ("final" if a.full else "quick" if a.no_render else "visual")
+    if mode == "quick":
+        a.no_render = True
+    if mode == "final":
+        a.full = True
+        a.strict = True
+        if a.json is None:
+            a.json = ""
     py = sys.executable
     out = os.path.join(ROOT, a.out)
 
     # 1) 생성
-    code, log = run([py, os.path.join(HERE, "run_blender.py"), os.path.abspath(a.generator), "--", "--out", out])
+    build_cmd = [py, os.path.join(HERE, "run_blender.py")]
+    if mode != "final":
+        build_cmd.append("--obj")
+    build_cmd += [os.path.abspath(a.generator), "--", "--out", out]
+    code, log = run(build_cmd)
     lines = [l for l in log.splitlines() if l.strip()]
     asset = None
     for l in lines:
@@ -122,36 +129,44 @@ def main():
             ex = "; ".join(str(x) for x in e["examples"][:a.list])
             print(f"   {tag} {e['msg']}" + (f"  e.g. {ex}" if ex else ""))
 
-    # 3) preview: previews/<asset>.png (latest) + previews/progress/<asset>/NNN_HHMMSS_<label>.png (history)
+    # 3) preview
     prev = None
     ok = not r["errors"]
+    preview_status = "NOT_CHECKED"
     if not a.no_render:
         prev = os.path.join(ROOT, "previews", asset + ".png")
         code, log = run([py, os.path.join(HERE, "render.py"), os.path.join(out, asset), "-o", prev, "--views", a.views, "--size", a.size])
         if code != 0:
+            preview_status = "FAIL"
             print(f"[3/3 preview] FAILED: {log.strip().splitlines()[-1] if log.strip() else '?'}")
             prev = None
         else:
+            preview_status = "PASS"
             hist = save_progress(prev, asset, ok, len(r["errors"]), a.label)
             print(f"[3/3 preview] {os.path.relpath(prev, ROOT)}  (history: {os.path.relpath(hist, ROOT)})")
-    # 4) photo comparison (only if photo_refs.json exists and images are rendered)
+
+    refs_exist = os.path.exists(os.path.join(ROOT, "photo_refs.json"))
     mism = None
     photo_lines = []
-    if not a.no_render and os.path.exists(os.path.join(ROOT, "photo_refs.json")):
-        code, log = run([py, os.path.join(HERE, "photo_check.py"), os.path.join(out, asset)])
+    photo_status = "NOT_APPLICABLE" if not refs_exist else "NOT_CHECKED"
+    if not a.no_render and refs_exist:
+        photo_code, log = run([py, os.path.join(HERE, "photo_check.py"), os.path.join(out, asset)])
         mism = sum(1 for l in log.splitlines() if l.strip().startswith("MISMATCH"))
-        print(f"[photo] {mism} mismatch(es) vs photos - sheets in previews/photo_check/")
+        photo_status = "FAIL" if photo_code == 2 or mism else "PASS"
+        print(f"[photo] status={photo_status} mismatch={mism} - sheets in previews/photo_check/")
         for l in log.splitlines():
             if l.strip().startswith(("MISMATCH", "MATCH", "INFO")):
                 s = l.strip().replace("MISMATCH", "PHOTO_MISMATCH", 1)
                 photo_lines.append(s)
                 print("   " + s)
-    # 5) tile-by-tile detail comparison (opt-in or --full) -> where is the model too simple?
-    tiles = dict(checked=False, simplified=[], detail=[], detail_color=[], color_off=[], tiles_off=0, tiles_total=0)
-    if (a.tiles or a.full) and not a.no_render and os.path.exists(os.path.join(ROOT, "photo_refs.json")):
-        code, log = run([py, os.path.join(HERE, "tile_compare.py"), os.path.join(out, asset), "--top", "3"])
+
+    tiles = dict(checked=False, status="NOT_APPLICABLE" if not refs_exist else "NOT_CHECKED",
+                 simplified=[], detail=[], detail_color=[], color_off=[], tiles_off=0, tiles_total=0)
+    if (a.tiles or a.full) and not a.no_render and refs_exist:
+        tile_code, log = run([py, os.path.join(HERE, "tile_compare.py"), os.path.join(out, asset), "--top", "3"])
         tiles["checked"] = True
-        print("[tiles] detail vs photos (SIMPLIFIED = model lacks detail the photo has) - open previews/tiles/*_map.png")
+        tiles["status"] = "FAIL" if tile_code == 2 else "PASS"
+        print(f"[tiles] status={tiles['status']} - open only flagged images in previews/tiles/")
         for l in log.splitlines():
             s = l.strip()
             if s.startswith(("TILE", "DETAIL", "COLOR", "ZONES", "INFO")):
@@ -168,13 +183,13 @@ def main():
                 tiles["detail"].append(s)
             elif "COLOR_OFF" in s:
                 tiles["color_off"].append(s)
-    # 6) LOD see-through gate (--full; needs Blender and a .blend)
-    lod = dict(checked=False, status="SKIP", line=None, notes=[])
+
+    lod = dict(checked=False, status="NOT_CHECKED", line=None, notes=[])
     if a.full:
         lscript = os.path.join(KIT, "tools", "qa", "lod_check.py")
         if not os.path.exists(lscript):
             lod["notes"].append("tools/qa/lod_check.py not found")
-            print("[lod] SKIP - tools/qa/lod_check.py not found")
+            print("[lod] NOT_CHECKED - tools/qa/lod_check.py not found")
         else:
             code, log = run([py, lscript, os.path.join(out, asset), "--res", "512"])
             lines_l = [l.strip() for l in log.splitlines() if l.strip()]
@@ -190,20 +205,51 @@ def main():
             else:
                 why = next((l for l in reversed(lines_l) if ".blend" in l or "Blender" in l), "")
                 lod["notes"].append(why or (lines_l[-1] if lines_l else "no output"))
-                print("[lod] SKIP - needs FBX/.blend and Blender" + (f" ({why})" if why else ""))
-    # 7) one GATE line + optional JSON (RESULT/exit code keep the old meaning: check errors only)
+                print("[lod] NOT_CHECKED - needs FBX/.blend and Blender" + (f" ({why})" if why else ""))
+
     reasons = []
+    incomplete = []
     if r["errors"]:
         reasons.append(f"check_errors={len(r['errors'])}")
+    if preview_status == "FAIL":
+        reasons.append("preview=FAIL")
     if mism:
         reasons.append(f"photo_mismatch={mism}")
+    if photo_status == "FAIL" and not mism:
+        reasons.append("photo=FAIL")
+    if tiles["status"] == "FAIL":
+        reasons.append("tiles=FAIL")
     if lod["status"] == "FAIL":
         reasons.append("lod=FAIL")
-    gate = "PASS" if not reasons else "FAIL"
+    if a.strict:
+        if mode == "final" and not fbx:
+            incomplete.append("fbx=NOT_CREATED")
+        for name, status in (("preview", preview_status), ("photo", photo_status),
+                             ("tiles", tiles["status"]), ("lod", lod["status"])):
+            if status == "NOT_CHECKED":
+                incomplete.append(f"{name}=NOT_CHECKED")
+    gate = "FAIL" if reasons else "INCOMPLETE" if incomplete else "PASS"
+    agent = agent_summary(r)
+    if r["errors"]:
+        next_action = dict(command=f"python tools/cycle.py {a.generator} --mode quick --json",
+                           reason=agent["exact_fix_instruction"])
+    elif mism:
+        next_action = dict(command=f"python tools/cycle.py {a.generator} --mode visual --json",
+                           reason="Fix only PHOTO_MISMATCH items; do not change geometry for INFO-only weak patterns")
+    elif incomplete:
+        next_action = dict(command=f"python tools/cycle.py {a.generator} --mode final --strict --json",
+                           reason="Required checks missing: " + ", ".join(incomplete))
+    elif reasons:
+        next_action = dict(command=f"python tools/cycle.py {a.generator} --mode {mode} --json",
+                           reason="Fix the failed check shown in this report")
+    else:
+        next_action = dict(command=None, reason="no fix needed")
+
     tstat = (f"tiles_off={tiles['tiles_off']}/{tiles['tiles_total']} simplified={len(tiles['simplified'])}"
-             if tiles["checked"] else "tiles=off")
-    pstat = f"photo_mismatch={mism}" if mism is not None else "photo=off"
+             if tiles["checked"] else f"tiles={tiles['status']}")
+    pstat = f"photo_mismatch={mism}" if mism is not None else f"photo={photo_status}"
     print(f"GATE {gate}" + (f" reasons={','.join(reasons)}" if reasons else "")
+          + (f" incomplete={','.join(incomplete)}" if incomplete else "")
           + f" lod={lod['status']} {tstat} {pstat}")
     if a.json is not None:
         jp = a.json or os.path.join(out, asset, "_check", "gate.json")
@@ -211,19 +257,27 @@ def main():
         parent = os.path.dirname(jp)
         if parent:
             os.makedirs(parent, exist_ok=True)
+        checks = dict(build="PASS", geometry="FAIL" if r["errors"] else "PASS", preview=preview_status,
+                      photo=photo_status, tiles=tiles["status"], lod=lod["status"], fbx="PASS" if fbx else "NOT_CREATED")
         with open(jp, "w", encoding="utf-8") as f:
-            json.dump(dict(asset=asset, label=a.label, time=time.strftime("%Y-%m-%d %H:%M:%S"),
+            json.dump(dict(status=gate, project=NAME, generator=os.path.basename(a.generator), mode=mode,
+                           checks=checks, errors=r["errors"], next_action=next_action,
+                           artifacts=dict(preview=os.path.relpath(prev, ROOT) if prev else None,
+                                          report=os.path.relpath(rep, ROOT)),
+                           asset=asset, label=a.label, time=time.strftime("%Y-%m-%d %H:%M:%S"),
                            build=dict(asset=asset, fbx=fbx, warnings=build_warns),
                            check=dict(errors=[e["msg"] for e in r["errors"]],
                                       warnings=[e["msg"] for e in r["warnings"]], info=i,
                                       report=os.path.relpath(rep, ROOT)),
-                           photo=dict(checked=mism is not None, mismatch=mism, lines=photo_lines),
-                           tiles=tiles, lod=lod,
-                           gate=dict(status=gate, reasons=reasons)), f, ensure_ascii=False, indent=1)
+                           photo=dict(checked=mism is not None, mismatch=mism, lines=photo_lines, status=photo_status),
+                           tiles=tiles, lod=lod, agent=agent,
+                           gate=dict(status=gate, reasons=reasons, incomplete=incomplete)), f, ensure_ascii=False, indent=1)
         print(f"[json] {os.path.relpath(jp, ROOT)}")
     print(f"RESULT {'PASS' if ok else 'FAIL'} errors={len(r['errors'])} warnings={len(r['warnings'])}"
           + (f" photo_mismatch={mism}" if mism is not None else "") + f" asset={asset} "
-          f"preview={os.path.relpath(prev, ROOT) if prev else None}")
+          f"preview={os.path.relpath(prev, ROOT) if prev else None} verification={gate}")
+    if a.strict:
+        sys.exit(0 if gate == "PASS" else 1 if gate == "FAIL" else 2)
     sys.exit(0 if ok else 1)
 
 

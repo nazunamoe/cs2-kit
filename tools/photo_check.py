@@ -23,7 +23,7 @@ What it does
   facade:    warps the photo wall to the model's elevation, measures the repeating floor pitch and window-bay pitch in the
              photo and in the model with the SAME method, and compares them (= floor count / bay count check).
 Prints one line per check:  MATCH / MISMATCH / INFO.   Sheets: previews/photo_check/<name>.png  (photo | model | overlay)
-Exit code 1 if any MISMATCH.
+Exit code 1 if any MISMATCH, 2 if a requested check could not run.
 """
 import argparse
 import json
@@ -37,7 +37,7 @@ from PIL import Image, ImageDraw, ImageFilter
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from extract_texture import warp  # noqa: E402
 from objio import load_asset  # noqa: E402
-from render import SKY, Tex, render  # noqa: E402
+from render import Tex  # noqa: E402
 
 from proj import ROOT, KIT, NAME  # noqa: E402,F401  (project folder; chdir done)
 TOL_RATIO = 0.08      # 8 % size/ratio tolerance
@@ -52,13 +52,8 @@ def p(s):
 
 
 def model_view(meshes, tex, yaw, pitch):
-    """Render, then crop to the building silhouette -> image whose edges are exactly the building extents."""
-    im = render([(meshes.get("main"), "s"), (meshes.get("win"), "window"), (meshes.get("gls"), "glass")],
-                tex, yaw, pitch, (1400, 1400), label=False)
-    a = np.asarray(im, np.float32) / 255.0
-    sky = np.abs(a - SKY[None, None, :]).max(-1) > 0.02
-    ys, xs = np.nonzero(sky)
-    return im.crop((xs.min(), ys.min(), xs.max() + 1, ys.max() + 1)), sky[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    from elevation_cache import model_crop
+    return model_crop(meshes, tex, yaw, pitch), None
 
 
 def extents(meshes, side):
@@ -219,21 +214,24 @@ def main():
     asset, meshes, texdir, _ = load_asset(a.path)
     tex = Tex(texdir, asset, False, "color")
     lines = []
+    failed = []
     if refs.get("satellite"):
         try:
             lines += check_satellite(refs["satellite"], meshes, tex, base)
         except Exception as e:  # noqa
+            failed.append("satellite")
             lines.append(f"INFO     satellite check failed: {e}")
     for ref in refs.get("facades", []):
         try:
             lines += check_facade(ref, meshes, tex, base)
         except Exception as e:  # noqa
+            failed.append(str(ref.get("side")))
             lines.append(f"INFO     facade {ref.get('side')} check failed: {e}")
     for l in lines:
         p("   " + l)
     n = sum(l.startswith("MISMATCH") for l in lines)
-    p(f"[photo] {n} mismatch(es). Sheets: previews/photo_check/")
-    sys.exit(1 if n else 0)
+    p(f"[photo] {n} mismatch(es), {len(failed)} failed check(s). Sheets: previews/photo_check/")
+    sys.exit(2 if failed else 1 if n else 0)
 
 
 if __name__ == "__main__":

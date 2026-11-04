@@ -413,11 +413,11 @@ def print_report(r):
 
 
 _FIX_TEXT = {
-    "APPLY_STAGE_1": "quality_stage 를 모든 preset_*/attach_* 호출에서 +1 올리고 cycle.py 재실행",
-    "APPLY_STAGE_2": "quality_stage=2 로 올리고, bay 수/반복 디테일 밀도도 줄여서 cycle.py 재실행",
-    "APPLY_STAGE_3_LOD_CULL": "LOD1/LOD2 생성 시 quality_stage=3 전달(장식 함수가 자동으로 아무것도 안 만듦)",
-    "CLAMP_UV": "custom quad 의 UV 를 A.uv_full/A.uv_tile 로 교체 (손으로 만든 UV 좌표 금지)",
-    "MERGE_VERTICES": "같은 preset_*/attach_* 호출이 루프 들여쓰기 등으로 중복 실행되는지 확인",
+    "REDUCE_MAIN_DETAIL": "main 이 95000 tris 를 넘음. 층수·bay·창 위치는 유지하고 숨은 면과 보조 디테일만 줄임",
+    "REDUCE_LOD_DETAIL": "LOD1/LOD2 에서 작은 부품을 제거. 프리셋 모드면 해당 LOD 호출에 quality_stage=3 전달",
+    "FIX_CUSTOM_UV": "ATLAS_UV 만 해당. custom quad UV 를 A.uv_full/A.uv_tile 등 atlas helper 로 교체",
+    "FIX_WINDOW_UV": "WindowSet.add_face 로 창을 다시 만들고 custom window UV 를 제거. 창 겹침 여부도 확인",
+    "REMOVE_DEGENERATE_FACES": "퇴화 면의 좌표를 확인하고 중복 호출 또는 같은 위치의 정점을 제거",
 }
 
 
@@ -428,19 +428,16 @@ def agent_summary(r):
     err_keys = {e["key"] for e in r["errors"]}
     warn_keys = {w["key"] for w in r["warnings"]}
     tags = []
-    tris = i.get("tris", {})
-    main_tris = tris.get("main", 0)
-    ratio = main_tris / 50000.0 if main_tris else 0.0
-    if 1.0 < ratio <= 1.15:
-        tags.append("APPLY_STAGE_1")
-    elif ratio > 1.15:
-        tags.append("APPLY_STAGE_2")
+    if "tris" in warn_keys:
+        tags.append("REDUCE_MAIN_DETAIL")
     if "lod1" in err_keys or "lod2" in err_keys:
-        tags.append("APPLY_STAGE_3_LOD_CULL")
-    if "atlas" in err_keys or "win_uv" in err_keys:
-        tags.append("CLAMP_UV")
+        tags.append("REDUCE_LOD_DETAIL")
+    if "atlas" in err_keys:
+        tags.append("FIX_CUSTOM_UV")
+    if "win_uv" in err_keys:
+        tags.append("FIX_WINDOW_UV")
     if "degenerate" in warn_keys:
-        tags.append("MERGE_VERTICES")
+        tags.append("REMOVE_DEGENERATE_FACES")
     fix = "; ".join(_FIX_TEXT[t] for t in tags) if tags else "no fix needed"
     lod_name = {"main": "LOD0", "lod1": "LOD1", "lod2": "LOD2"}
     verts = {lod_name[k]: v for k, v in i.get("verts", {}).items() if k in lod_name}

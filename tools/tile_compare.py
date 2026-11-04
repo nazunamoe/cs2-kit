@@ -20,7 +20,7 @@ Numbers are a guide: trees, shadows and perspective lower them on real photos. O
 Colour: per-tile median colour of photo vs model (overall exposure matched) -> COLOR lines with both hex values, tiles with
 dE > 14 are COLOR_OFF; ZONES lines list paint bands by height (rows) and by width (cols) for photo and model.
 Before modelling:  python tools/tile_compare.py --photo-zones front:60x45   (bands + colours of the photo wall only)
-Exit code 0 always (this is a finder, not a gate).
+Scores are advisory; exit code 2 means a requested comparison could not run.
 """
 import argparse
 import json
@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from extract_texture import warp  # noqa: E402
 from objio import load_asset  # noqa: E402
 from photo_check import YAW, edges, extents, gray  # noqa: E402
-from render import SKY, Tex, render  # noqa: E402
+from render import Tex  # noqa: E402
 
 from proj import ROOT, KIT, NAME  # noqa: E402,F401  (project folder; chdir done)
 COLOR_OFF = 14.0       # Lab distance above which a tile's paint colour is called wrong (relative to the whole wall)
@@ -46,12 +46,8 @@ def p(s):
 
 
 def model_crop(meshes, tex, yaw, pitch, size):
-    im = render([(meshes.get("main"), "s"), (meshes.get("win"), "window"), (meshes.get("gls"), "glass")],
-                tex, yaw, pitch, (size, size), label=False)
-    a = np.asarray(im, np.float32) / 255.0
-    sky = np.abs(a - SKY[None, None, :]).max(-1) > 0.02
-    ys, xs = np.nonzero(sky)
-    return im.crop((xs.min(), ys.min(), xs.max() + 1, ys.max() + 1))
+    from elevation_cache import model_crop as cached_crop
+    return cached_crop(meshes, tex, yaw, pitch, size)
 
 
 def near(mask, tol):
@@ -251,6 +247,7 @@ def main():
     asset, meshes, texdir, _ = load_asset(a.path)
     tex = Tex(texdir, asset, False, "color")
     lines = []
+    failed = []
     tiles_dir = os.path.join(ROOT, "previews", "tiles")
     jobs = []
     if refs.get("satellite"):
@@ -277,10 +274,12 @@ def main():
                 tm = tuple(float(t) for t in a.tile_m.lower().split("x"))
             lines += run_wall(name, photo, model, a.ppm, tm, a.top, os.path.join(tiles_dir, name), Wm, Hm)
         except Exception as e:  # noqa
+            failed.append(name)
             lines.append(f"INFO tiles {name} failed: {e}")
     for l in lines:
         p("   " + l)
-    p(f"[tiles] heat maps + worst tiles in previews/tiles/  (open <side>_map.png first, then <side>/rXXcYY.png)")
+    p(f"[tiles] {len(failed)} failed check(s). Open only flagged maps and worst tiles in previews/tiles/")
+    sys.exit(2 if failed else 0)
 
 
 if __name__ == "__main__":

@@ -73,6 +73,7 @@ def new(name, template):
         raise SystemExit(f"[project] projects/{name} already exists")
     os.makedirs(os.path.join(d, "photos"))
     shutil.copyfile(os.path.join(TEMPLATES, "TASK.md"), os.path.join(d, "TASK.md"))
+    shutil.copyfile(os.path.join(TEMPLATES, "STATUS.md"), os.path.join(d, "STATUS.md"))
     ex = "example_curtainwall_cs2.py" if template == "cw" else "example_building_cs2.py"
     gen = name.replace("-", "_") + "_cs2.py"
     shutil.copyfile(os.path.join(KIT, ex), os.path.join(d, gen))
@@ -92,7 +93,7 @@ def lst():
 
 def migrate(name, apply, facade):
     valid(name)
-    names = {"TASK.md", "photo_refs.json", "shape_notes.md", "research_notes.md", "SPEC.md"}
+    names = {"TASK.md", "STATUS.md", "photo_refs.json", "shape_notes.md", "research_notes.md", "SPEC.md"}
     dirs = {"output", "previews", "backup", "textures_src", "refs", "photos"}
     if facade:
         dirs.add("facade_tools")

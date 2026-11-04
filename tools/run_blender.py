@@ -4,8 +4,9 @@ run_blender.py — Blender 를 찾아서 생성기를 백그라운드로 실행 
 
 사용:
   python tools/run_blender.py --find                              찾기만 (찾은 경로를 tools/blender_path.txt 에 저장)
-  python tools/run_blender.py my_building_cs2.py -- --out output    생성기 실행 (-- 뒤는 생성기 인자)
-  python tools/run_blender.py --fbx2obj output/<asset>             FBX → _check/*.obj (check.py·render.py 용)
+  python tools/run_blender.py my_building_cs2.py -- --out output       Blender 사용 가능 시 FBX 까지 생성
+  python tools/run_blender.py --obj my_building_cs2.py -- --out output  일반 Python 으로 OBJ 만 생성 (반복용)
+  python tools/run_blender.py --fbx2obj output/<asset>                FBX → _check/*.obj (check.py·render.py 용)
   python tools/run_blender.py --set "D:\\Blender\\blender.exe"       경로 직접 지정·저장
 
 찾는 순서: 환경변수 BLENDER → tools/blender_path.txt → PATH(blender) → Windows 레지스트리·Program Files·Steam
@@ -128,6 +129,9 @@ for fbx in sorted(glob.glob(os.path.join(folder, "*.fbx"))):
 
 def main():
     argv = sys.argv[1:]
+    force_obj = "--obj" in argv
+    if force_obj:
+        argv.remove("--obj")
     gen_args = []
     if "--" in argv:
         i = argv.index("--")
@@ -156,11 +160,12 @@ def main():
         print(__doc__)
         return
     script = os.path.abspath(argv[0])
-    bl = find_blender(verbose=True)
+    bl = None if force_obj else find_blender(verbose=True)
     if bl:
         cmd = [bl, "--background", "--factory-startup", "--python-exit-code", "1", "--python", script, "--"] + gen_args
     else:
-        print("[blender] Blender not found -> running with plain python (OBJ only, NO FBX)")
+        if not force_obj:
+            print("[blender] Blender not found -> running with plain python (OBJ only, NO FBX)")
         cmd = [sys.executable, script] + gen_args
     print("[run] " + " ".join(f'"{c}"' if " " in c else c for c in cmd))
     r = subprocess.run(cmd, cwd=os.path.dirname(script))
