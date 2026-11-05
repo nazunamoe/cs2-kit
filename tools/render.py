@@ -130,9 +130,7 @@ def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=Fa
             sub[upd] = dep[upd]
             reg[upd] = 1.0
             continue
-        if KIND[i] == "window":
-            col = np.broadcast_to((np.array([1.0, 0.85, 0.55]) * 0.8 if night else WINC * shade[i]), gx.shape + (3,))
-        elif KIND[i] == "glass":
+        if KIND[i] == "glass":
             upd = m & (dep < sub)
             reg[upd] = reg[upd] * 0.62 + GLS * 0.38 * (0.3 if night else 1)
             continue
