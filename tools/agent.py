@@ -75,6 +75,24 @@ def project_lock():
             pass
 
 
+def review_command(gate):
+    artifacts = []
+    preview = (gate.get("artifacts") or {}).get("preview")
+    if preview:
+        artifacts.append(preview)
+    if (gate.get("photo") or {}).get("checked"):
+        folder = os.path.join(ROOT, "previews", "photo_check")
+        if os.path.isdir(folder):
+            artifacts += [os.path.join("previews", "photo_check", f) for f in sorted(os.listdir(folder)) if f.endswith(".png")]
+    for line in (gate.get("tiles") or {}).get("detail", []):
+        parts = line.split()
+        if len(parts) > 1:
+            artifacts.append(os.path.join("previews", "tiles", parts[1] + "_map.png"))
+    artifacts = list(dict.fromkeys(path.replace(os.sep, "/") for path in artifacts))
+    cmd = f"python tools/agent.py review --project {NAME} --status PASS --note \"reviewed current artifacts\""
+    return cmd + "".join(f" --artifact \"{path}\"" for path in artifacts)
+
+
 def next_for(status, generator, mode="quick"):
     if status == "PASS":
         return {"command": None, "reason": "all requested checks passed"}
@@ -162,29 +180,44 @@ def normalized_cycle(args):
                 "checks": {"build": "FAIL"}, "errors": [{"msg": "cycle failed before gate.json; see the raw log"}],
                 "next_action": next_for("FAIL", os.path.basename(generator)),
             }
+        preview_rel = (gate.get("artifacts") or {}).get("preview")
+        preview_path = os.path.join(ROOT, preview_rel) if preview_rel else None
+        preview_hash = digest(preview_path) if preview_path and os.path.isfile(preview_path) else None
+        if args.mode != "quick" and state.get("reviewed_preview_hash") != preview_hash:
+            state["visual_review"] = "NOT_CHECKED"
         status = gate.get("status", "FAIL")
-        visual_pending = status == "PASS" and args.mode != "quick" and state.get("visual_review") != "PASS"
-        if visual_pending:
-            status = "INCOMPLETE"
-            gate["status"] = status
-            gate.setdefault("checks", {})["visual_review"] = "NOT_CHECKED"
-            gate.setdefault("gate", {}).setdefault("incomplete", []).append("visual_review=NOT_CHECKED")
-            if gate_path:
-                write_json(os.path.join(ROOT, gate_path), gate)
+        mismatch_keys = sorted(line.split(":", 1)[0] for line in (gate.get("photo") or {}).get("lines", [])
+                               if line.startswith("PHOTO_MISMATCH"))
+        signature = "\n".join(mismatch_keys)
         previous_signature = (state.get("mismatch_attempts") or {}).get("signature")
-        signature = "\n".join((gate.get("photo") or {}).get("lines") or [])
         attempts = state.get("mismatch_attempts") or {}
         if signature:
             attempts = {"signature": signature, "count": (attempts.get("count", 0) + 1) if signature == previous_signature else 1}
         else:
             attempts = {}
+        human_pending = bool(signature and attempts.get("count", 0) >= 3 and status == "FAIL")
+        visual_pending = status == "PASS" and args.mode != "quick" and state.get("visual_review") != "PASS"
+        if human_pending:
+            status = "NEEDS_HUMAN_REVIEW"
+            gate["status"] = status
+            gate.setdefault("checks", {})["photo_review"] = "NEEDS_HUMAN_REVIEW"
+        elif visual_pending:
+            status = "INCOMPLETE"
+            gate["status"] = status
+            gate.setdefault("checks", {})["visual_review"] = "NOT_CHECKED"
+            gate.setdefault("gate", {}).setdefault("incomplete", []).append("visual_review=NOT_CHECKED")
+        if (human_pending or visual_pending) and gate_path:
+            write_json(os.path.join(ROOT, gate_path), gate)
         next_action = next_for(status, os.path.basename(generator), args.mode)
-        if visual_pending:
-            next_action = {"command": f"python tools/agent.py review --project {NAME} --status PASS --note \"reviewed current previews\"",
-                           "reason": "inspect the current preview and flagged photo/tile images, then record the review"}
+        if human_pending:
+            next_action = {"command": None, "reason": "same photo mismatch reached 3 attempts; inspect the photo_refs and comparison sheets manually"}
+        elif visual_pending:
+            next_action = {"command": review_command(gate),
+                           "reason": "inspect the listed current artifacts, then record the review"}
         state.update({
             "current_stage": f"{args.mode}:{status}", "generator": os.path.relpath(generator, ROOT),
-            "generator_hash": gen_hash, "last_gate": gate, "mismatch_attempts": attempts, "next_action": next_action,
+            "generator_hash": gen_hash, "current_preview_hash": preview_hash,
+            "last_gate": gate, "mismatch_attempts": attempts, "next_action": next_action,
         })
         save_state(state)
         result = {
@@ -194,6 +227,16 @@ def normalized_cycle(args):
             "action_tags": (gate.get("agent") or {}).get("action_tags", []), "next_action": state["next_action"],
             "gate": gate_path, "state": os.path.relpath(STATE, ROOT), "log": os.path.relpath(log_path, ROOT),
         }
+        if args.brief:
+            result = {"status": status, "project": NAME, "mode": args.mode, "next_action": state["next_action"]}
+            if status != "PASS":
+                result.update(checks=gate.get("checks", {}), gate=gate_path,
+                              photo_mismatch=(gate.get("photo") or {}).get("mismatch"))
+                errors = gate.get("errors", [])
+                if errors:
+                    first = errors[0]
+                    result["error"] = {"key": first.get("key"), "message": first.get("msg"),
+                                       "example": (first.get("examples") or [None])[0]}
         emit(result, args.json, 0 if status == "PASS" else 1 if status == "FAIL" else 2)
 
 
@@ -246,12 +289,15 @@ def photos(args):
         rel = os.path.relpath(path, ROOT)
         stat = os.stat(path)
         old = previous.get(rel, {})
-        if old.get("mtime_ns") == stat.st_mtime_ns and old.get("bytes") == stat.st_size:
+        unchanged = old.get("mtime_ns") == stat.st_mtime_ns and old.get("bytes") == stat.st_size
+        if unchanged:
             h = old["sha256"]
+            size = old.get("size")
         else:
             h = digest(path)
-        with Image.open(path) as im:
-            size = im.size
+        if not unchanged or not size:
+            with Image.open(path) as im:
+                size = im.size
         records.append({"file": rel, "sha256": h, "size": size, "mtime_ns": stat.st_mtime_ns,
                         "bytes": stat.st_size, "duplicate_of": seen.get(h)})
         seen.setdefault(h, rel)
@@ -282,9 +328,10 @@ def photos(args):
     else:
         sheet_path = None
     unobserved = [r["file"] for r in records if not r["observed"] and not r["duplicate_of"]]
+    unobserved_page = [r["file"] for r in selected if not r["observed"] and not r["duplicate_of"]]
     emit({"status": "OK", "contact_sheet": os.path.relpath(sheet_path, ROOT) if sheet_path else None,
           "page": args.page, "pages": (len(records) + args.page_size - 1) // args.page_size,
-          "unobserved_count": len(unobserved), "unobserved": unobserved[:50], "manifest": os.path.relpath(manifest, ROOT),
+          "unobserved_count": len(unobserved), "unobserved": unobserved_page, "manifest": os.path.relpath(manifest, ROOT),
           "next_action": {"command": None, "reason": "inspect one contact-sheet page, then crop only ambiguous regions"}}, args.json)
 
 
@@ -307,24 +354,55 @@ def review(args):
     gate = state.get("last_gate")
     if not gate:
         raise SystemExit("run a visual or final cycle before review")
-    state["visual_review"] = args.status
+    artifacts = []
+    for path in args.artifact:
+        absolute = os.path.abspath(path)
+        if not os.path.isfile(absolute):
+            raise SystemExit(f"review artifact not found: {path}")
+        artifacts.append(os.path.relpath(absolute, ROOT).replace(os.sep, "/"))
+    review_status = args.status
+    if args.status == "PASS":
+        expected_preview = ((gate.get("artifacts") or {}).get("preview") or "").replace(os.sep, "/")
+        missing = []
+        if not expected_preview or expected_preview not in artifacts:
+            missing.append("current preview")
+        if (gate.get("photo") or {}).get("checked") and not any(p.startswith("previews/photo_check/") for p in artifacts):
+            missing.append("photo sheet")
+        if (gate.get("tiles") or {}).get("checked") and not any(p.startswith("previews/tiles/") for p in artifacts):
+            missing.append("tile map")
+        if missing:
+            review_status = "PARTIAL"
+    state["visual_review"] = review_status
     state["visual_review_note"] = args.note
-    gate.setdefault("checks", {})["visual_review"] = args.status
+    state["visual_review_artifacts"] = [{"file": p, "sha256": digest(os.path.join(ROOT, p))} for p in artifacts]
+    if review_status == "PASS":
+        state["reviewed_preview_hash"] = state.get("current_preview_hash")
+    gate.setdefault("checks", {})["visual_review"] = review_status
     other_failure = any(value == "FAIL" for key, value in gate.get("checks", {}).items() if key != "visual_review")
     other_missing = gate.get("mode") == "final" and any(value in ("NOT_CHECKED", "NOT_CREATED")
                         for key, value in gate.get("checks", {}).items() if key != "visual_review")
-    gate["status"] = "FAIL" if args.status == "FAIL" or other_failure else "INCOMPLETE" if other_missing else "PASS"
+    gate["status"] = ("FAIL" if args.status == "FAIL" or other_failure else "INCOMPLETE"
+                      if other_missing or review_status != "PASS" else "PASS")
     incomplete = gate.setdefault("gate", {}).setdefault("incomplete", [])
-    gate["gate"]["incomplete"] = [item for item in incomplete if not item.startswith("visual_review=")]
+    incomplete = [item for item in incomplete if not item.startswith("visual_review=")]
+    if review_status != "PASS":
+        incomplete.append(f"visual_review={review_status}")
+    gate["gate"]["incomplete"] = incomplete
     state["last_gate"] = gate
     state["current_stage"] = f"review:{gate['status']}"
-    state["next_action"] = next_for(gate["status"], gate.get("generator", ""), gate.get("mode", "quick"))
+    if review_status == "PARTIAL":
+        state["next_action"] = {"command": review_command(gate), "reason": "review all required current artifacts"}
+    elif review_status == "NEEDS_HUMAN_REVIEW":
+        state["next_action"] = {"command": None, "reason": "visual input unavailable; a human must inspect the current artifacts"}
+    else:
+        state["next_action"] = next_for(gate["status"], gate.get("generator", ""), gate.get("mode", "quick"))
     save_state(state)
     gate_path = os.path.join(ROOT, "output", gate.get("asset", ""), "_check", "gate.json")
     if gate.get("asset") and os.path.isfile(gate_path):
         write_json(gate_path, gate)
-    emit({"status": gate["status"], "checks": gate.get("checks", {}), "next_action": state["next_action"]},
-         args.json, 0 if gate["status"] == "PASS" else 1 if gate["status"] == "FAIL" else 2)
+    emit({"status": gate["status"], "visual_review": review_status, "checks": gate.get("checks", {}),
+          "next_action": state["next_action"]}, args.json,
+         0 if gate["status"] == "PASS" else 1 if gate["status"] == "FAIL" else 2)
 
 
 def fix(args):
@@ -356,18 +434,28 @@ def fix(args):
         if not fix_state:
             raise SystemExit("no pending fix; run fix without --finish first")
         code, log = run([PY, os.path.join(KIT, "tools", "cycle.py"), generator, "--mode", "final", "--json", "--label", "fix"])
-        diff_cmd = [PY, os.path.join(KIT, "tools", "compare.py"), "diff", fix_state["snapshot"],
-                    os.path.join(ROOT, "output", fix_state["asset"])]
-        if fix_state.get("box"):
-            diff_cmd.append("--box=" + fix_state["box"])
-        diff_code, diff_log = run(diff_cmd)
         gate = None
         for line in log.splitlines():
             if line.startswith("[json] "):
                 gate = read_json(os.path.join(ROOT, line[7:].strip()), None)
-        status = "FAIL" if code == 1 or diff_code else "INCOMPLETE" if code == 2 else "PASS"
+        can_compare = bool(gate and (gate.get("checks") or {}).get("build") == "PASS"
+                           and gate.get("asset") == fix_state["asset"])
+        if can_compare:
+            diff_cmd = [PY, os.path.join(KIT, "tools", "compare.py"), "diff", fix_state["snapshot"],
+                        os.path.join(ROOT, "output", fix_state["asset"])]
+            if fix_state.get("box"):
+                diff_cmd.append("--box=" + fix_state["box"])
+            diff_code, diff_log = run(diff_cmd)
+            compare_status = "FAIL" if diff_code else "PASS"
+        else:
+            diff_code, diff_log = 0, "NOT_CHECKED: current build did not produce the expected asset"
+            compare_status = "NOT_CHECKED"
+        status = "FAIL" if code == 1 or diff_code or not gate or (gate.get("checks") or {}).get("build") == "FAIL" else "INCOMPLETE" if code == 2 else "PASS"
         gen_hash = digest(generator)
-        if state.get("generator_hash") != gen_hash:
+        preview_rel = (gate.get("artifacts") or {}).get("preview") if gate else None
+        preview_path = os.path.join(ROOT, preview_rel) if preview_rel else None
+        preview_hash = digest(preview_path) if preview_path and os.path.isfile(preview_path) else None
+        if state.get("generator_hash") != gen_hash or state.get("reviewed_preview_hash") != preview_hash:
             state["visual_review"] = "NOT_CHECKED"
         visual_pending = status == "PASS" and state.get("visual_review") != "PASS"
         if visual_pending:
@@ -378,15 +466,16 @@ def fix(args):
         state["current_stage"] = f"fix:{status}"
         state["generator"] = os.path.relpath(generator, ROOT)
         state["generator_hash"] = gen_hash
+        state["current_preview_hash"] = preview_hash
         state["last_gate"] = gate or state.get("last_gate")
         state["next_action"] = next_for(status, os.path.basename(generator), "final")
         if visual_pending:
-            state["next_action"] = {"command": f"python tools/agent.py review --project {NAME} --status PASS --note \"reviewed fix previews\"",
-                                    "reason": "inspect the fix preview and compare result, then record the review"}
+            state["next_action"] = {"command": review_command(gate),
+                                    "reason": "inspect the listed fix artifacts and compare result, then record the review"}
         state.pop("fix", None)
         save_state(state)
         emit({"status": status, "checks": (gate or {}).get("checks", {}),
-              "compare": {"status": "PASS" if diff_code == 0 else "FAIL", "output": diff_log.splitlines()[-30:]},
+              "compare": {"status": compare_status, "output": diff_log.splitlines()[-30:]},
               "cycle_output": log.splitlines()[-30:], "next_action": state["next_action"]}, args.json,
              0 if status == "PASS" else 1 if status == "FAIL" else 2)
 
@@ -402,7 +491,7 @@ def main():
     p = sub.add_parser("photos")
     p.add_argument("--json", action="store_true")
     p.add_argument("--page", type=int, default=0)
-    p.add_argument("--page-size", type=int, default=30)
+    p.add_argument("--page-size", type=int, default=16)
     p.set_defaults(fn=photos)
     p = sub.add_parser("observe")
     p.add_argument("--json", action="store_true")
@@ -412,11 +501,13 @@ def main():
     p.set_defaults(fn=observe)
     p = sub.add_parser("review")
     p.add_argument("--json", action="store_true")
-    p.add_argument("--status", choices=("PASS", "FAIL"), required=True)
+    p.add_argument("--status", choices=("PASS", "FAIL", "NEEDS_HUMAN_REVIEW"), required=True)
     p.add_argument("--note", required=True)
+    p.add_argument("--artifact", action="append", default=[])
     p.set_defaults(fn=review)
     p = sub.add_parser("cycle")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--brief", action="store_true")
     p.add_argument("--generator", required=True)
     p.add_argument("--mode", choices=("quick", "visual", "final"), default="quick")
     p.add_argument("--label", default="")

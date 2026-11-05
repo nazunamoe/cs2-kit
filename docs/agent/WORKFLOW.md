@@ -11,63 +11,65 @@ python tools/agent.py doctor --project <project> --json
 python tools/agent.py resume --project <project> --json
 ```
 
-Read `TASK.md`, the selected generator, and only the reference documents needed for that building type. Use the native file-editing tool when available. Never interpolate source code into shell strings. `tools/put.py` and `tools/edit.py` are fallbacks for environments without reliable native editing.
+Read `TASK.md`, the selected generator, and only references needed for that building type. Use native editing tools when available. Never interpolate source into shell strings. `tools/put.py` and `tools/edit.py` are fallbacks.
 
 ## 2. Photos without repeated image reads
 
 ```bash
-python tools/agent.py photos --project <project> --page 0 --page-size 30 --json
+python tools/agent.py photos --project <project> --page 0 --page-size 16 --json
 ```
 
-Inspect one contact-sheet page. Select representative, non-duplicate images. Crop only ambiguous walls or details with `tools/sat_grid.py`. Record observations so unchanged photos need not be read again:
+Inspect one contact-sheet page. Select representative, non-duplicate images and crop only ambiguous regions with `tools/sat_grid.py`. Record observations so unchanged photos need not be read again:
 
 ```bash
 python tools/agent.py observe --project <project> --photo photos/front.jpg --side front --note "36 rows; left 3 bays obscured" --json
 ```
 
-Create `photo_refs.json` when images can be inspected. If image input is unavailable, do not invent visual observations: use supplied refs or record visual/photo checks as unavailable.
+Create `photo_refs.json` when images can be inspected. An existing but empty refs file is a failed configuration, not a skipped check. If image input is unavailable, do not invent observations: use supplied refs or report that visual review is unavailable.
 
 ## 3. Build loop
 
-Use one semantic change per iteration. Choose the smallest useful gate:
+Use one semantic change per iteration and the smallest useful gate. Add `--brief` for a minimal model-facing result.
 
 ```bash
-python tools/agent.py cycle --project <project> --generator <name>_cs2.py --mode quick --label mass --json
-python tools/agent.py cycle --project <project> --generator <name>_cs2.py --mode visual --label windows --json
-python tools/agent.py cycle --project <project> --generator <name>_cs2.py --mode final --label final --json
+python tools/agent.py cycle --project <project> --generator <name>_cs2.py --mode quick --label mass --brief --json
+python tools/agent.py cycle --project <project> --generator <name>_cs2.py --mode visual --label windows --brief --json
+python tools/agent.py cycle --project <project> --generator <name>_cs2.py --mode final --label final --brief --json
 ```
 
 - `quick`: normal Python, OBJ, geometry/spec checks. Use for syntax and geometry-error retries.
-- `visual`: OBJ, preview, and photo checks when refs exist. Use after mass, windows, facade, roof, and material changes.
-- `final`: Blender FBX/.blend, preview, photo, tiles, full LOD, and strict gate. Use before reporting and scoped-fix completion.
+- `visual`: OBJ, preview, and photo checks when refs exist.
+- `final`: Blender FBX/.blend, preview, shared photo/tile analysis, full LOD, and strict gate.
 
-Follow the JSON `next_action`. Do not parse the entire raw log unless the summary points to it. Detailed reports are in `output/<asset>/_check/gate.json`; raw output is in `work/logs/last_cycle.log`.
+Follow the JSON `next_action`. Do not parse full logs unless the summary points to them. Detailed reports are in `output/<asset>/_check/gate.json`; raw output is in `work/logs/last_cycle.log`.
 
-Build order: mass -> windows -> facade parts -> roof -> LOD -> textures -> YAML -> final. Correct mass and floor pitch before adding detail.
+Build order: mass -> windows -> facade parts -> roof -> LOD -> textures -> YAML -> final. Correct mass and floor pitch before detail.
 
-## 4. Gate meaning
+## 4. Gate meaning and visual evidence
 
-- `PASS`: every requested check passed.
+- `PASS`: every requested check and required review passed.
 - `FAIL`: a requested check ran and failed.
 - `INCOMPLETE`: a required check or visual review did not run.
-- `NOT_APPLICABLE`: no `photo_refs.json` exists; this is not a failed photo comparison.
+- `NEEDS_HUMAN_REVIEW`: automated retries stopped or visual input is unavailable.
+- `NOT_APPLICABLE`: no `photo_refs.json` exists.
 - `NOT_CHECKED`: never treat this as verified.
+- `PARTIAL`: some required review artifacts were not inspected.
 
-After a visual/final run, inspect the current preview and only flagged photo/tile images. Then record the review:
+After visual/final, run the exact review command returned in `next_action`. It includes `--artifact` for the current preview and required photo/tile images. Inspect those images before executing it. Example shape:
 
 ```bash
-python tools/agent.py review --project <project> --status PASS --note "reviewed final preview and flagged tiles" --json
+python tools/agent.py review --project <project> --status PASS --note "reviewed current images" --artifact previews/<asset>.png --artifact previews/photo_check/facade_front.png --json
 ```
 
-Use `--status FAIL` when the images disagree with the references. Changing the generator resets the review to `NOT_CHECKED`.
+Use `--status FAIL` when images disagree. If image input is unavailable, use `--status NEEDS_HUMAN_REVIEW`; do not claim PASS. Changing the generator or rendering a new preview resets the review. Review records artifact paths and hashes.
 
 A final strict run requires Blender, FBX, executed photo/tile checks when refs exist, LOD, and visual review. Tile scores are advisory; execution failures and explicit photo mismatches are not.
 
 ## 5. Resume and retry limits
 
-`work/agent_state.json` stores the generator hash, last gate, next action, mismatch signature/count, and visual review. `STATUS.md` is its short human-readable summary. Read these instead of replaying old conversations.
+`work/agent_state.json` stores generator/preview hashes, last gate, next action, stable mismatch IDs/count, and review artifacts. `STATUS.md` is its short human summary. Read these instead of replaying old conversations.
 
-Do not repeat an unchanged failing command. After three attempts on the same photo mismatch, stop changing that item and record the evidence and reason in `building_spec_<Name>.yaml` under `photo_mismatch_notes`.
+Do not repeat an unchanged failing command. After three attempts with the same wall+metric mismatch, the agent returns `NEEDS_HUMAN_REVIEW` instead of another visual loop. Record evidence and reasons in `building_spec_<Name>.yaml` under `photo_mismatch_notes`.
 
 ## 6. Scoped fix
 
@@ -77,14 +79,8 @@ Begin before editing. Use the current asset from the last gate or pass `--asset`
 python tools/agent.py fix --project <project> --generator <name>_cs2.py --request "change only entrance railing" --box=x0,x1,y0,y1,z0,z1 --json
 ```
 
-Edit only the requested scope, then run the exact `next_action` command, equivalent to:
-
-```bash
-python tools/agent.py fix --project <project> --generator <name>_cs2.py --finish --json
-```
-
-This runs the final gate and `compare.py diff`. A mesh change outside `--box` fails the fix. Review the resulting preview before final PASS.
+Edit only the requested scope, then run the exact returned `--finish` command. This runs final and `compare.py diff`. A mesh change outside `--box` fails the fix. If the current build fails or produces another asset, compare is `NOT_CHECKED`; stale output is never used as a successful diff. Inspect the returned artifacts and record review before final PASS.
 
 ## 7. Final report
 
-Report changed files, final gate/check statuses, warnings, FBX status, estimated values, remaining photo/tile issues with reasons, and in-game checks. Do not report final PASS when the gate is FAIL or INCOMPLETE.
+Report changed files, final gate/check statuses, warnings, FBX status, estimated values, remaining photo/tile issues with reasons, and in-game checks. Never report final PASS for FAIL, INCOMPLETE, PARTIAL, or NEEDS_HUMAN_REVIEW.
