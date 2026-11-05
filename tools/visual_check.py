@@ -34,7 +34,7 @@ def main():
         p("[visual] FAIL: no satellite or facade checks")
         sys.exit(2)
     base = os.path.dirname(os.path.abspath(args.refs))
-    asset, meshes, texdir, _ = load_asset(args.path)
+    asset, meshes, texdir, manifest = load_asset(args.path)
     tex = Tex(texdir, asset, False, "color")
     photo_lines = []
     tile_lines = []
@@ -43,20 +43,26 @@ def main():
     for name, ref in jobs:
         try:
             img = Image.open(os.path.join(base, ref["file"])).convert("RGB")
-            Wm, Hm = PC.extents(meshes, "top" if name == "satellite" else name)
+            if name == "satellite":
+                Wm, Hm = PC.extents(meshes, "top")
+                box = None
+            else:
+                Wm, Hm, box = PC.wall_measure(ref, meshes, name, manifest)
             corners = ref["corners"]
             if name == "satellite":
                 corners = [corners[3], corners[2], corners[1], corners[0]]
             w30, h30 = int(Wm * 30), int(Hm * 30)
             photo30 = warp(img, corners, w30, h30)
-            yaw, pitch = (0, 90) if name == "satellite" else (PC.YAW[name], 0)
-            model = TC.model_crop(meshes, tex, yaw, pitch, 2200)
+            yaw, pitch = (0, 90) if name == "satellite" else (PC.wall_yaw(ref, name, manifest), 0)
+            model = TC.model_crop(meshes, tex, yaw, pitch, 2200, box=box)
             model30 = model.resize((w30, h30))
             w20, h20 = int(Wm * PC.PX_PER_M), int(Hm * PC.PX_PER_M)
             prepared = (photo30.resize((w20, h20)), model30.resize((w20, h20)))
             try:
-                fn = PC.check_satellite if name == "satellite" else PC.check_facade
-                photo_lines += fn(ref, meshes, tex, base, prepared=prepared)
+                if name == "satellite":
+                    photo_lines += PC.check_satellite(ref, meshes, tex, base, prepared=prepared)
+                else:
+                    photo_lines += PC.check_facade(ref, meshes, tex, base, prepared=prepared, manifest=manifest)
             except Exception as exc:  # noqa
                 photo_failed += 1
                 photo_lines.append(f"INFO     {name} photo check failed: {exc}")

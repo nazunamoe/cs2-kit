@@ -335,6 +335,20 @@ def photos(args):
           "next_action": {"command": None, "reason": "inspect one contact-sheet page, then crop only ambiguous regions"}}, args.json)
 
 
+def evidence(args):
+    require_project()
+    evidence_args = args.evidence_args[1:] if args.evidence_args[:1] == ["--"] else args.evidence_args
+    if not evidence_args:
+        raise SystemExit("use agent.py evidence --project P -- <photo|feature|validate options>")
+    code, log = run([PY, os.path.join(KIT, "tools", "evidence.py")] + evidence_args)
+    try:
+        result = json.loads(log.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        result = {"status": "FAIL", "errors": [log.strip() or "evidence tool failed"]}
+    result.setdefault("next_action", {"command": None, "reason": "record observations by wall and confidence"})
+    emit(result, args.json, code)
+
+
 def observe(args):
     require_project()
     path = os.path.abspath(args.photo)
@@ -493,6 +507,10 @@ def main():
     p.add_argument("--page", type=int, default=0)
     p.add_argument("--page-size", type=int, default=16)
     p.set_defaults(fn=photos)
+    p = sub.add_parser("evidence")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("evidence_args", nargs=argparse.REMAINDER)
+    p.set_defaults(fn=evidence)
     p = sub.add_parser("observe")
     p.add_argument("--json", action="store_true")
     p.add_argument("--photo", required=True)

@@ -58,7 +58,7 @@ SUFFIX = {"main": "", "win": "_Win", "gls": "_Gls", "lod1": "_LOD1", "lod1_win":
 # 메시 빌더
 # =============================================================================
 class MeshBuilder:
-    """사각면 목록. 면마다 UV 4개와 태그(아틀라스 칸 이름)."""
+    """사각면 목록. 면마다 꼭짓점 UV와 태그(아틀라스 칸 이름)."""
 
     def __init__(self, atlas=None, split_tiles=True):
         """split_tiles=False: tile materials are NOT cut into real-size pieces (one quad per face).
@@ -72,6 +72,13 @@ class MeshBuilder:
         self.verts.extend(tuple(float(c) for c in p) for p in pts)
         self.faces.append((i, i + 1, i + 2, i + 3))
         self.uvs.append([tuple(map(float, t)) for t in uv4])
+        self.tags.append(tag)
+
+    def tri(self, pts, uv3, tag):
+        i = len(self.verts)
+        self.verts.extend(tuple(float(c) for c in p) for p in pts)
+        self.faces.append((i, i + 1, i + 2))
+        self.uvs.append([tuple(map(float, t)) for t in uv3])
         self.tags.append(tag)
 
     def rect(self, pts, region):
@@ -128,7 +135,7 @@ class MeshBuilder:
 
     @property
     def tri_count(self):
-        return 2 * len(self.faces)
+        return sum(len(face) - 2 for face in self.faces)
 
 
 def face_pts(axis, c, s, a0, a1, z0, z1):
@@ -484,6 +491,303 @@ def attach_entrance_canopy(meta, bay_index, style="flat", quality_stage=QualityS
         post = 0.25
         for cx, cy in ((x0, y0), (x1, y1)):
             meta.mb.box(cx - post / 2, cx + post / 2, cy - post / 2, cy + post / 2, 0, h0, "canopy", skip=("bottom",))
+
+
+def _ring_area(ring):
+    return 0.5 * sum(ring[i][0] * ring[(i + 1) % len(ring)][1] - ring[(i + 1) % len(ring)][0] * ring[i][1]
+                     for i in range(len(ring)))
+
+
+def _point_in_triangle(p, a, b, c):
+    def cross(q, r, s):
+        return (r[0] - q[0]) * (s[1] - q[1]) - (r[1] - q[1]) * (s[0] - q[0])
+    values = (cross(a, b, p), cross(b, c, p), cross(c, a, p))
+    return min(values) >= -1e-9
+
+
+def _triangulate_ring(ring):
+    pts = list(ring)
+    triangles = []
+    guard = 0
+    while len(pts) > 3 and guard < len(ring) * len(ring):
+        guard += 1
+        for i in range(len(pts)):
+            a, b, c = pts[i - 1], pts[i], pts[(i + 1) % len(pts)]
+            cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+            if cross <= 1e-9:
+                continue
+            if any(_point_in_triangle(p, a, b, c) for j, p in enumerate(pts)
+                   if j not in (i - 1, i, (i + 1) % len(pts))):
+                continue
+            triangles.append((a, b, c))
+            del pts[i]
+            break
+        else:
+            raise ValueError("footprint must be a simple non-self-intersecting polygon")
+    if len(pts) == 3:
+        triangles.append(tuple(pts))
+    return triangles
+
+
+def volume_prism(A, footprint, height, z0=0.0, volume_id="volume", wall="wall", roof=None,
+                 quality_stage=QualityStage.FULL, meta=None, mb=None, wall_ids=None):
+    """Create one arbitrary simple polygon volume and wall-linked metadata."""
+    ring = [(float(x), float(y)) for x, y in footprint]
+    if len(ring) < 3:
+        raise ValueError("volume footprint needs at least 3 points")
+    if _ring_area(ring) < 0:
+        ring.reverse()
+    if abs(_ring_area(ring)) < 1e-6 or height <= 0:
+        raise ValueError("volume footprint area and height must be positive")
+    mb = mb or MeshBuilder(A)
+    meta = meta or BuildingMeta(mb)
+    if not hasattr(meta, "VOLUMES"):
+        meta.VOLUMES = {}
+    z1 = z0 + height
+    volume = dict(volume_id=volume_id, footprint=ring, z0=z0, z1=z1,
+                  roof_perimeter=ring, wall_ids=[])
+    meta.VOLUMES[volume_id] = volume
+    for i, p0 in enumerate(ring):
+        p1 = ring[(i + 1) % len(ring)]
+        dx, dy = p1[0] - p0[0], p1[1] - p0[1]
+        length = math.hypot(dx, dy)
+        if length < 1e-6:
+            continue
+        nx, ny = dy / length, -dx / length
+        wall_id = None
+        if isinstance(wall_ids, dict):
+            wall_id = wall_ids.get(str(i))
+        elif wall_ids and i < len(wall_ids):
+            wall_id = wall_ids[i]
+        wall_id = wall_id or f"{volume_id}:edge_{i:02d}"
+        axis, c, s, a0, a1 = _wall_from_segment(*p0, *p1)
+        meta.WALLS[wall_id] = dict(wall_id=wall_id, volume_id=volume_id, axis=axis, c=c, s=s,
+                                   a0=a0, a1=a1, z0=z0, z1=z1, length_m=length,
+                                   p0=p0, p1=p1, normal_xy=[nx, ny],
+                                   normal_deg=math.degrees(math.atan2(nx, ny)) % 360,
+                                   box=[min(p0[0], p1[0]) - 0.3, max(p0[0], p1[0]) + 0.3,
+                                        min(p0[1], p1[1]) - 0.3, max(p0[1], p1[1]) + 0.3, z0, z1],
+                                   row_z=[z0, z1])
+        volume["wall_ids"].append(wall_id)
+        mb.rect([(p0[0], p0[1], z0), (p1[0], p1[1], z0),
+                 (p1[0], p1[1], z1), (p0[0], p0[1], z1)], wall)
+    roof_region = roof or wall
+    for a, b, c in _triangulate_ring(ring):
+        mb.tri([(a[0], a[1], z1), (b[0], b[1], z1), (c[0], c[1], z1)],
+               A.uv(roof_region)[:3], roof_region)
+    if not meta.ROOF_PERIMETER:
+        meta.ROOF_PERIMETER = ring
+    front = [meta.WALLS[w] for w in volume["wall_ids"] if meta.WALLS[w]["normal_xy"][1] < -0.5]
+    if front:
+        w = min(front, key=lambda item: (item["p0"][1] + item["p1"][1]) / 2)
+        meta.ENTRANCE_SOCKETS.append(dict(pos=((w["p0"][0] + w["p1"][0]) / 2,
+                                                (w["p0"][1] + w["p1"][1]) / 2),
+                                           facing_deg=w["normal_deg"], bay_index=0, wall_id=w["wall_id"]))
+    return meta
+
+
+def wall_quad(wall, u0, u1, z0, z1, offset=0.0):
+    """Normalized wall coordinates to an outward-facing quad, including angled walls."""
+    if "p0" not in wall:
+        a0 = wall["a0"] + (wall["a1"] - wall["a0"]) * u0
+        a1 = wall["a0"] + (wall["a1"] - wall["a0"]) * u1
+        return face_pts(wall["axis"], wall["c"] + wall["s"] * offset, wall["s"], a0, a1, z0, z1)
+    p0, p1 = wall["p0"], wall["p1"]
+    nx, ny = wall["normal_xy"]
+    x0, y0 = p0[0] + (p1[0] - p0[0]) * u0 + nx * offset, p0[1] + (p1[1] - p0[1]) * u0 + ny * offset
+    x1, y1 = p0[0] + (p1[0] - p0[0]) * u1 + nx * offset, p0[1] + (p1[1] - p0[1]) * u1 + ny * offset
+    return [(x0, y0, z0), (x1, y1, z0), (x1, y1, z1), (x0, y0, z1)]
+
+
+def feature_panel(meta, wall_id, u0, u1, z0, z1, region, offset=0.02):
+    meta.mb.rect(wall_quad(meta.WALLS[wall_id], u0, u1, z0, z1, offset), region)
+
+
+def wall_solid(meta, wall_id, u0, u1, z0, z1, region, offset=0.0, thickness=0.04):
+    """Closed thin prism on any wall, used where a one-sided rail would disappear from behind."""
+    wall = meta.WALLS[wall_id]
+    back = wall_quad(wall, u0, u1, z0, z1, offset)
+    front = wall_quad(wall, u0, u1, z0, z1, offset + thickness)
+    b0, b1, b2, b3 = back
+    f0, f1, f2, f3 = front
+    faces = [list(reversed(back)), front,
+             [b1, f1, f0, b0], [b2, b3, f3, f2],
+             [b0, f0, f3, b3], [b1, b2, f2, f1]]
+    for points in faces:
+        meta.mb.rect(points, region)
+
+
+def feature_window_band(meta, wins, wall_id, u0, u1, z0, z1, bays=1,
+                        floor=0, unit=0, quality_stage=QualityStage.FULL):
+    """Measured normalized window band; frames are omitted only at trim-cull stages."""
+    wall = meta.WALLS[wall_id]
+    bays = max(1, int(bays))
+    width = wall.get("length_m", abs(wall["a1"] - wall["a0"]))
+    for i in range(bays):
+        a = u0 + (u1 - u0) * i / bays
+        b = u0 + (u1 - u0) * (i + 1) / bays
+        wins.add_pts(wall_quad(wall, a, b, z0, z1, WIN_OFF),
+                     wall_quad(wall, a, b, z0, z1, LOD2_WIN_OFF),
+                     width * (b - a), z1 - z0, floor, unit)
+    if quality_stage < QualityStage.SIMPLIFY_TRIM:
+        frame = 0.06
+        feature_panel(meta, wall_id, u0, u1, z0, min(z1, z0 + frame), "frame", WIN_OFF + 0.02)
+        feature_panel(meta, wall_id, u0, u1, max(z0, z1 - frame), z1, "frame", WIN_OFF + 0.02)
+        for i in range(1, bays):
+            u = u0 + (u1 - u0) * i / bays
+            du = frame / max(width, 0.1) / 2
+            feature_panel(meta, wall_id, max(u0, u - du), min(u1, u + du), z0 + frame, z1 - frame, "frame", WIN_OFF + 0.02)
+
+
+def generic_sign_slot(meta, wall_id, u0, u1, z0, z1, quality_stage=QualityStage.FULL):
+    if quality_stage < QualityStage.LOD_CULL:
+        feature_panel(meta, wall_id, u0, u1, z0, z1, "sign_slot", 0.025)
+
+
+def feature_shopfront(meta, wins, wall_id, u0=0.05, u1=0.95, z0=0.2, z1=2.8,
+                      bays=4, sign_z=None, canopy_index=None, quality_stage=QualityStage.FULL):
+    feature_window_band(meta, wins, wall_id, u0, u1, z0, z1, bays, 0, 0, quality_stage)
+    if sign_z:
+        generic_sign_slot(meta, wall_id, u0, u1, sign_z[0], sign_z[1], quality_stage)
+    if canopy_index is not None:
+        attach_entrance_canopy(meta, canopy_index, quality_stage=quality_stage)
+
+
+def feature_louver_zone(meta, wall_id, u0, u1, z0, z1, spacing=0.12,
+                        quality_stage=QualityStage.FULL):
+    if quality_stage >= QualityStage.LOD_CULL:
+        return
+    feature_panel(meta, wall_id, u0, u1, z0, z1, "louver_back", 0.015)
+    z = z0
+    while z < z1 - 1e-6:
+        feature_panel(meta, wall_id, u0, u1, z, min(z1, z + 0.035), "louver", 0.05)
+        z += spacing
+
+
+def feature_railing_zone(meta, gls, wall_id, u0, u1, z0, z1, spacing=0.12,
+                         glass=True, quality_stage=QualityStage.FULL):
+    if quality_stage >= QualityStage.LOD_CULL:
+        return
+    wall_solid(meta, wall_id, u0, u1, z1 - 0.06, z1, "railing", 0.025, 0.04)
+    if glass:
+        gls.rect(wall_quad(meta.WALLS[wall_id], u0, u1, z0, z1, 0.025), "glass")
+    if quality_stage == QualityStage.FULL:
+        length = meta.WALLS[wall_id].get("length_m", 1.0)
+        count = max(2, int(length / spacing))
+        for i in range(count + 1):
+            u = u0 + (u1 - u0) * i / count
+            du = min(0.008, 0.0125 / max(length, 0.1))
+            wall_solid(meta, wall_id, max(u0, u - du), min(u1, u + du), z0, z1 - 0.06,
+                       "railing", 0.03, 0.03)
+
+
+def feature_roof_equipment(meta, volume_id, size=(2.0, 2.0), height=1.2, center=None,
+                           quality_stage=QualityStage.FULL):
+    if quality_stage >= QualityStage.LOD_CULL:
+        return
+    volume = meta.VOLUMES[volume_id]
+    ring = volume["footprint"]
+    cx, cy = center or ((min(x for x, _ in ring) + max(x for x, _ in ring)) / 2,
+                        (min(y for _, y in ring) + max(y for _, y in ring)) / 2)
+    w, d = size
+    z0 = volume["z1"]
+    meta.mb.box(cx - w / 2, cx + w / 2, cy - d / 2, cy + d / 2, z0, z0 + height,
+                "roof_equipment", skip=("bottom",))
+
+
+def feature_covered_link(meta, start, end, width=3.0, height=3.0, z0=0.0,
+                         volume_id="link", quality_stage=QualityStage.FULL):
+    dx, dy = end[0] - start[0], end[1] - start[1]
+    length = math.hypot(dx, dy)
+    if length < 0.1:
+        raise ValueError("covered link endpoints must differ")
+    nx, ny = -dy / length * width / 2, dx / length * width / 2
+    ring = [(start[0] + nx, start[1] + ny), (end[0] + nx, end[1] + ny),
+            (end[0] - nx, end[1] - ny), (start[0] - nx, start[1] - ny)]
+    return volume_prism(meta.mb.atlas, ring, height, z0, volume_id, "canopy", "canopy",
+                        quality_stage, meta, meta.mb)
+
+
+def validate_volume_spec(spec):
+    """Validate IDs, footprints, references, normalized ranges, and vertical ranges."""
+    errors = []
+    volumes = spec.get("volumes", [])
+    ids = [v.get("id") for v in volumes]
+    if not volumes:
+        errors.append("volumes must not be empty")
+    if len(set(ids)) != len(ids):
+        errors.append("volume ids must be unique")
+    wall_ids = set()
+    for volume in volumes:
+        if not volume.get("id"):
+            errors.append("volume id is required")
+        if len(volume.get("footprint", [])) < 3:
+            errors.append(f"{volume.get('id')}: footprint needs 3 points")
+        if volume.get("height", 0) <= 0:
+            errors.append(f"{volume.get('id')}: height must be positive")
+        named = volume.get("wall_ids")
+        generated = [named.get(str(i)) if isinstance(named, dict) else named[i] if named and i < len(named)
+                     else f"{volume.get('id')}:edge_{i:02d}" for i in range(len(volume.get("footprint", [])))]
+        for wall_id in generated:
+            if wall_id in wall_ids:
+                errors.append(f"duplicate wall id: {wall_id}")
+            wall_ids.add(wall_id)
+    for i, item in enumerate(spec.get("openings", []) + spec.get("attachments", [])):
+        wall = item.get("wall")
+        if wall and wall not in wall_ids:
+            errors.append(f"feature {i}: unknown wall {wall}")
+        if "u0" in item and not (0 <= item["u0"] < item.get("u1", 1) <= 1):
+            errors.append(f"feature {i}: invalid normalized u range")
+        if "z0" in item and item.get("z1", item["z0"]) <= item["z0"]:
+            errors.append(f"feature {i}: z1 must be above z0")
+    if errors:
+        raise ValueError("invalid volume spec: " + "; ".join(errors))
+    return True
+
+
+def build_volume_spec(A, spec, quality_stage=QualityStage.FULL):
+    """Build a data-driven collection of volumes and wall features at one LOD stage."""
+    validate_volume_spec(spec)
+    mb = MeshBuilder(A, split_tiles=quality_stage < QualityStage.LOD_CULL)
+    meta = BuildingMeta(mb)
+    meta.VOLUMES = {}
+    wins, gls = WindowSet(), MeshBuilder(A)
+    for volume in spec.get("volumes", []):
+        volume_prism(A, volume["footprint"], volume["height"], volume.get("z0", 0.0),
+                     volume["id"], volume.get("wall", "wall"), volume.get("roof"),
+                     quality_stage, meta, mb, volume.get("wall_ids"))
+    features = spec.get("openings", []) + spec.get("attachments", [])
+    for item in features:
+        kind = item["type"]
+        if kind == "window_band":
+            feature_window_band(meta, wins, item["wall"], item.get("u0", 0.05), item.get("u1", 0.95),
+                                item["z0"], item["z1"], item.get("bays", 1), item.get("floor", 0),
+                                item.get("unit", 0), quality_stage)
+        elif kind == "shopfront":
+            feature_shopfront(meta, wins, item["wall"], item.get("u0", 0.05), item.get("u1", 0.95),
+                              item.get("z0", 0.2), item.get("z1", 2.8), item.get("bays", 4),
+                              item.get("sign_z"), item.get("canopy_index"), quality_stage)
+        elif kind == "sign_slot":
+            generic_sign_slot(meta, item["wall"], item["u0"], item["u1"], item["z0"], item["z1"], quality_stage)
+        elif kind == "louver_zone":
+            feature_louver_zone(meta, item["wall"], item["u0"], item["u1"], item["z0"], item["z1"],
+                                item.get("spacing", 0.12), quality_stage)
+        elif kind == "railing_zone":
+            feature_railing_zone(meta, gls, item["wall"], item["u0"], item["u1"], item["z0"], item["z1"],
+                                 item.get("spacing", 0.12), item.get("glass", True), quality_stage)
+        elif kind == "roof_equipment":
+            feature_roof_equipment(meta, item["volume"], item.get("size", (2.0, 2.0)),
+                                   item.get("height", 1.2), item.get("center"), quality_stage)
+        elif kind == "covered_link":
+            feature_covered_link(meta, item["start"], item["end"], item.get("width", 3.0),
+                                 item.get("height", 3.0), item.get("z0", 0.0),
+                                 item.get("id", "link"), quality_stage)
+        elif kind == "entrance_canopy":
+            attach_entrance_canopy(meta, item.get("index", 0), quality_stage=quality_stage)
+        else:
+            raise ValueError(f"unknown feature type: {kind}")
+    return dict(meta=meta, mb=mb, windows=wins, gls=gls,
+                metadata=dict(volumes=meta.VOLUMES, walls=meta.WALLS))
 
 
 def match_wall_ids(meta, slices, tol_deg=20.0):
@@ -1095,15 +1399,17 @@ class WindowSet:
 # 내보내기
 # =============================================================================
 def write_obj(path, mb):
-    """OBJ (Y-up: x, z, -y). 면마다 UV 4개."""
+    """OBJ (Y-up: x, z, -y). 면마다 꼭짓점 UV."""
     with open(path, "w") as f:
         for x, y, z in mb.verts:
             f.write("v %.5f %.5f %.5f\n" % (x, z, -y))
         for uv4 in mb.uvs:
             for u, v in uv4:
                 f.write("vt %.6f %.6f\n" % (u, v))
-        for fi, face in enumerate(mb.faces):
-            f.write("f " + " ".join("%d/%d" % (vi + 1, fi * 4 + k + 1) for k, vi in enumerate(face)) + "\n")
+        offset = 0
+        for face in mb.faces:
+            f.write("f " + " ".join("%d/%d" % (vi + 1, offset + k + 1) for k, vi in enumerate(face)) + "\n")
+            offset += len(face)
 
 
 def asset_name(base, level, size_xy, front_yard=6.0, margin=2.0, lot=None):
@@ -1113,7 +1419,7 @@ def asset_name(base, level, size_xy, front_yard=6.0, margin=2.0, lot=None):
     return f"{base}_L{level}_{lw}x{ld}", (lw, ld)
 
 
-def export_asset(name_base, level, meshes, atlas, out_root, lod2_tex=1024, lot=None, front_yard=6.0, notes=None):
+def export_asset(name_base, level, meshes, atlas, out_root, lod2_tex=1024, lot=None, front_yard=6.0, notes=None, metadata=None):
     """meshes: {"main","lod1","lod2", 선택: "gls","lod1_gls"} MeshBuilder + "windows": WindowSet.
     피벗을 바닥 중앙으로 옮기고, 이름(로트 포함)을 정한 뒤, 텍스처·OBJ(또는 FBX)·manifest.json 을 씀. 반환: (폴더, 요약 dict)"""
     lod2_tex = min(lod2_tex, atlas.size)
@@ -1174,8 +1480,8 @@ def export_asset(name_base, level, meshes, atlas, out_root, lod2_tex=1024, lot=N
                    tris={k: parts[k].tri_count for k in PARTS}, windows=len(win_main.faces), tex=atlas.size,
                    lod1_tex=atlas.size, lod2_tex=lod2_tex, warnings=warns, notes=notes or {})
     with open(os.path.join(folder, "manifest.json"), "w", encoding="utf-8") as f:
-        json.dump(dict(summary, atlas=atlas.to_json(), tags={k: sorted(set(parts[k].tags)) for k in PARTS}), f,
-                  ensure_ascii=False, indent=1)
+        json.dump(dict(summary, atlas=atlas.to_json(), tags={k: sorted(set(parts[k].tags)) for k in PARTS},
+                       metadata=metadata or {}), f, ensure_ascii=False, indent=1)
     chk = os.path.join(folder, "_check")                  # 검사·미리보기용 OBJ (게임에 넣지 않음)
     os.makedirs(chk, exist_ok=True)
     for k in PARTS:

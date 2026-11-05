@@ -21,7 +21,7 @@ python tools/agent.py doctor --project <project> --json
 python tools/agent.py resume --project <project> --json
 ```
 
-For a new building, a human or an explicit setup step runs `python tools/project.py new <project> [--template cw]`. Read `TASK.md`, the selected generator, and `docs/agent/WORKFLOW.md`.
+For a new building, a human or an explicit setup step runs `python tools/project.py new <project> [--template cw|generic]`. Use `generic` for data-driven mixed-use/school/irregular volumes. Read `TASK.md`, the selected generator, and `docs/agent/WORKFLOW.md`.
 
 Global memory is not a source of building-specific facts. Retrieve only relevant, scoped lessons using `docs/agent/MEMORY.md`. Keep current-building observations in project files.
 
@@ -72,6 +72,8 @@ Use `WindowSet.add_face` for windows. Use atlas UV helpers for custom quads. `ax
 - Tool commands and preset API: `TOOLS.md`
 - Detailed facade/photo modeling: `docs/agent/MODELING.md`
 - Existing facade lessons: `docs/FACADE_KNOWHOW.md`
+- Photo-only evidence and wall refs: `docs/agent/PHOTO_ONLY.md`
+- Generic volumes and feature schema: `docs/agent/VOLUMES.md`
 - Memory scope: `docs/agent/MEMORY.md`
 - PowerShell editing fallback: `docs/agent/POWERSHELL.md`
 

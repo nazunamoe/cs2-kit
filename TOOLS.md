@@ -121,6 +121,13 @@ Mass uses `preset_plate_apartment`/`preset_tower_l_core`, optional `preset_pilot
 
 V1 limitations: piloti depth is simplified; facade_read/band_scan need real-photo verification; paint grids add color overlays, while physical relief still uses `axbox`. Existing non-preset generators remain valid.
 
+## Photo evidence and generic volumes
+
+- `docs/agent/PHOTO_ONLY.md`: wall-linked photo evidence, normalized U/V observations, confidence, wall-specific refs.
+- `docs/agent/VOLUMES.md`: `--template generic`, arbitrary polygon volumes, wall features, volume LODs, and manifest wall metadata.
+- `tools/evidence.py`: photo/feature/validate ledger commands; normally called through `agent.py evidence`.
+- `K.volume_prism`, `K.build_volume_spec`, `K.wall_quad`: generic geometry API. `export_asset(..., metadata=...)` stores wall/volume metadata for photo alignment.
+
 ## Known limits
 
 The preview renderer is orthographic with simple lighting, not the game renderer. Window blocking samples three points per window. Photo and tile metrics are vulnerable to occlusion, shadows, and weak patterns. FBX and LOD require Blender. Always check game scale, appearance, night lights, alpha, entrance, and registration in game.

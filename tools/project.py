@@ -3,8 +3,8 @@
 project.py - manage projects and the memory folder (run from the kit root)
 
   python tools/project.py init                          create memory/ (from templates/memory, never overwrites) and projects/
-  python tools/project.py new <name> [--template cw]    projects/<name>/ with TASK.md + generator copy, becomes the active project
-                                                        (--template cw = curtain wall example; default = slab apartment example)
+  python tools/project.py new <name> [--template cw|generic]  create TASK.md + STATUS.md + generator, become active
+                                                        cw = curtain wall; generic = data-driven volumes; default = slab apartment
   python tools/project.py use <name>                    make <name> the active project (projects/.current)
   python tools/project.py list                          projects, * = active
   python tools/project.py where                         active project folder
@@ -74,9 +74,11 @@ def new(name, template):
     os.makedirs(os.path.join(d, "photos"))
     shutil.copyfile(os.path.join(TEMPLATES, "TASK.md"), os.path.join(d, "TASK.md"))
     shutil.copyfile(os.path.join(TEMPLATES, "STATUS.md"), os.path.join(d, "STATUS.md"))
-    ex = "example_curtainwall_cs2.py" if template == "cw" else "example_building_cs2.py"
+    ex = {"cw": "example_curtainwall_cs2.py", "generic": "example_generic_cs2.py"}.get(template, "example_building_cs2.py")
     gen = name.replace("-", "_") + "_cs2.py"
     shutil.copyfile(os.path.join(KIT, ex), os.path.join(d, gen))
+    if template == "generic":
+        shutil.copyfile(os.path.join(TEMPLATES, "generic_spec.example.json"), os.path.join(d, "generic_spec.json"))
     use(name)
     p(f"[project] made projects/{name}/ : TASK.md (fill in), photos/ (put photos here), {gen} (copy of {ex})")
     p(f"          build: python tools/cycle.py {gen} --label mass     (paths are relative to the active project)")
