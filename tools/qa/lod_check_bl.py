@@ -129,8 +129,8 @@ for el in elevs:
             h_in = hole
             pct = 100.0 * h_in.sum() / n_ref
             rows.append(dict(lod=g, az=az, el=el, hole_pct=round(pct, 3), hole_px=int(h_in.sum()),
-                             where=locate(groups[g], h_in, d) if pct > 0.05 else []))
-            if pct > 0.05:                                    # 구멍이 보이는 각도는 그림으로 남김: 흰 = 메인, 빨강 = 구멍
+                             where=locate(groups[g], h_in, d) if pct > 0 else []))
+            if pct > 0.02:                                    # 임계 근접 구멍도 그림/좌표로 남김: 흰 = 메인, 빨강 = 구멍
                 rgb = np.zeros((res, res, 3), np.uint8)
                 rgb[ref] = (90, 90, 90)
                 rgb[masks[g]] = (220, 220, 220)

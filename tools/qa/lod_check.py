@@ -16,6 +16,7 @@ import argparse, json, os, subprocess, sys, glob
 
 KIT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tools/qa/ -> 키트 루트
 LIMIT = 0.05
+MARGIN = 0.03
 
 
 def blender_exe():
@@ -125,6 +126,7 @@ def main():
     if os.path.exists(man):                            # kit 이 피벗을 바닥 가운데로 옮긴 양
         shift = tuple(json.load(open(man, encoding="utf-8")).get("pivot_shift", (0.0, 0.0)))
     ok = True
+    marginal = False
     summary = []
     for g in ("main", "lod1", "lod2"):
         rs = [x for x in rows if x["lod"] == g]
@@ -132,12 +134,20 @@ def main():
             continue
         worst = max(rs, key=lambda x: x["hole_pct"])
         bad = [x for x in rs if x["hole_pct"] > LIMIT]
+        small = [x for x in rs if 0 < x["hole_pct"] <= LIMIT]
         ok &= not bad
+        if worst["hole_pct"] > MARGIN:
+            marginal = True
         summary.append(f"{g} max {worst['hole_pct']:.3f}% (az {worst['az']:.0f}, el {worst['el']:+.0f}) bad_views {len(bad)}/{len(rs)}")
         for x in sorted(bad, key=lambda x: -x["hole_pct"])[:6]:
             print(f"  HOLE {g} az {x['az']:5.1f} el {x['el']:+5.1f}  {x['hole_pct']:.3f}%  ({x['hole_px']} px)")
             for p in x.get("where", []):
                 # 비쳐 보이는 뒷면의 위치: 내보낸 좌표(xyz)와 생성기 좌표(gen = xyz - pivot_shift), 그 면의 법선
+                gx = [p["xyz"][0] - shift[0], p["xyz"][1] - shift[1], p["xyz"][2]]
+                print(f"      at gen ({gx[0]:.2f}, {gx[1]:.2f}, {gx[2]:.2f})  normal {tuple(p['normal'])}  {p['px']} px  [{p['obj']}]")
+        for x in sorted(small, key=lambda x: -x["hole_pct"])[:3]:
+            print(f"  HOLE_SMALL {g} az {x['az']:5.1f} el {x['el']:+5.1f}  {x['hole_pct']:.3f}%  ({x['hole_px']} px)")
+            for p in x.get("where", []):
                 gx = [p["xyz"][0] - shift[0], p["xyz"][1] - shift[1], p["xyz"][2]]
                 print(f"      at gen ({gx[0]:.2f}, {gx[1]:.2f}, {gx[2]:.2f})  normal {tuple(p['normal'])}  {p['px']} px  [{p['obj']}]")
     # 텍스처: 게임은 메시 이름으로 <메시>_<맵>.png 를 찾는다. LOD 에 자기 이름의 맵이 없으면 유리처럼(투명) 그려진다
@@ -152,7 +162,11 @@ def main():
             ok = False
             print(f"  NO_TEXTURE {mesh}: {', '.join(miss)} missing (copy the main maps under this name)")
     verdict = ("QUICK " + ("ok" if ok else "bad")) if a.quick else ("PASS" if ok else "FAIL")
-    print(f"LODCHECK {verdict} " + " | ".join(summary) + f"  -> {os.path.relpath(out, proj)}")
+    if marginal and not a.quick:
+        print(f"  WARN LOD main/LOD margin is above {MARGIN:.2f}% but below the {LIMIT:.2f}% limit")
+    print(f"LODCHECK {verdict} " + " | ".join(summary)
+          + (" marginal=1" if marginal and not a.quick else "")
+          + f"  -> {os.path.relpath(out, proj)}")
 
 
 if __name__ == "__main__":
