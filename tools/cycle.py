@@ -9,6 +9,8 @@ Strict exit codes: 0 PASS, 1 FAIL, 2 INCOMPLETE. Non-strict RESULT keeps the leg
 Use tools/agent.py for compact next_action JSON, resume state, and visual-review recording.
 """
 import argparse
+import glob
+import hashlib
 import json
 import os
 import re
@@ -59,6 +61,39 @@ def save_progress(img_path, asset, ok, n_err, label):
     return hist
 
 
+CACHE_VERSION = 2
+
+
+def mesh_signature(asset_dir):
+    """Hash all check OBJ parts; texture-only edits keep the same signature."""
+    h = hashlib.sha256()
+    files = sorted(glob.glob(os.path.join(asset_dir, "_check", "*.obj")))
+    for path in files:
+        h.update(os.path.basename(path).encode("utf-8"))
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+    return h.hexdigest()
+
+
+def read_cache(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if data.get("version") == CACHE_VERSION else None
+    except Exception:
+        return None
+
+
+def write_cache(path, data):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=1)
+    except Exception as exc:
+        print(f"[cache] WARN could not write {path}: {exc}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("generator")
@@ -86,25 +121,27 @@ def main():
     py = sys.executable
     out = os.path.join(ROOT, a.out)
 
-    # 1) 생성
-    build_cmd = [py, os.path.join(HERE, "run_blender.py")]
-    if mode != "final":
-        build_cmd.append("--obj")
-    build_cmd += [os.path.abspath(a.generator), "--", "--out", out]
+    # 1) 생성: always write OBJ first (fast, also gives the mesh signature)
+    build_cmd = [py, os.path.join(HERE, "run_blender.py"), "--obj",
+                 os.path.abspath(a.generator), "--", "--out", out]
     code, log = run(build_cmd)
     lines = [l for l in log.splitlines() if l.strip()]
     asset = None
     for l in lines:
         if l.startswith("[cs2kit] ") and "_L" in l and "tris" not in l:
             asset = l.split()[1]
-    fbx = any("FBX + .blend" in l for l in lines)
+    fbx = False
     if code != 0 or not asset:
         print("[1/3 build] FAILED - last output:")
         for l in lines[-25:]:
             print("   " + l)
         print(f"RESULT FAIL errors=generator asset=None preview=None")
         sys.exit(2)
-    print(f"[1/3 build] {asset}  ({'FBX written' if fbx else 'NO FBX - Blender not found, checking OBJ'})")
+    if mode == "final":
+        stage = "OBJ first pass"
+    else:
+        stage = "FBX written" if fbx else "OBJ only"
+    print(f"[1/3 build] {asset}  ({stage})")
     build_warns = [l.strip() for l in lines if "[WARN]" in l]
     for l in lines:
         if "[WARN]" in l or l.startswith("[cs2kit] tris"):
@@ -129,18 +166,53 @@ def main():
             ex = "; ".join(str(x) for x in e["examples"][:a.list])
             print(f"   {tag} {e['msg']}" + (f"  e.g. {ex}" if ex else ""))
 
+    # 1b) FBX/LOD cache: mesh-only signature; texture/paint edits reuse both
+    asset_dir = os.path.join(out, asset)
+    mesh_sig = mesh_signature(asset_dir)
+    cache_path = os.path.join(asset_dir, "_check", "final_cache.json")
+    cache = read_cache(cache_path)
+    cache_ok = bool(cache and cache.get("mesh_sig") == mesh_sig)
+    cached_lod = cache.get("lod") if cache_ok else None
+    if mode == "final":
+        have_fbx = bool(glob.glob(os.path.join(asset_dir, "*.fbx"))) and \
+                   bool(glob.glob(os.path.join(asset_dir, "*.blend")))
+        if cache_ok and have_fbx:
+            fbx = True
+            print("[1/3 build] FBX/.blend cached (mesh unchanged)")
+        else:
+            code2, log2 = run([py, os.path.join(HERE, "run_blender.py"),
+                               os.path.abspath(a.generator), "--", "--out", out])
+            lines2 = [l for l in log2.splitlines() if l.strip()]
+            fbx = any("FBX + .blend" in l for l in lines2) and \
+                  bool(glob.glob(os.path.join(asset_dir, "*.fbx"))) and \
+                  bool(glob.glob(os.path.join(asset_dir, "*.blend")))
+            build_warns += [l.strip() for l in lines2 if "[WARN]" in l]
+            if not fbx:
+                print("[1/3 build] FBX export FAILED")
+                for l in lines2[-12:]:
+                    print("   " + l)
+            else:
+                print("[1/3 build] FBX/.blend written")
+                mesh_sig = mesh_signature(asset_dir)
+                cache_ok = bool(cache and cache.get("mesh_sig") == mesh_sig)
+                cached_lod = cache.get("lod") if cache_ok else None
+
     lod = dict(checked=False, status="NOT_CHECKED", line=None, notes=[])
     lod_future = None
     lod_executor = None
     if a.full:
-        lscript = os.path.join(KIT, "tools", "qa", "lod_check.py")
-        if not os.path.exists(lscript):
-            lod["notes"].append("tools/qa/lod_check.py not found")
-            print("[lod] NOT_CHECKED - tools/qa/lod_check.py not found")
+        if cached_lod and cached_lod.get("checked"):
+            lod = dict(cached_lod)
+            print(f"[lod] cached {lod.get('line') or lod.get('status')}")
         else:
-            import concurrent.futures as cf
-            lod_executor = cf.ThreadPoolExecutor(max_workers=1)
-            lod_future = lod_executor.submit(run, [py, lscript, os.path.join(out, asset), "--res", "512"])
+            lscript = os.path.join(KIT, "tools", "qa", "lod_check.py")
+            if not os.path.exists(lscript):
+                lod["notes"].append("tools/qa/lod_check.py not found")
+                print("[lod] NOT_CHECKED - tools/qa/lod_check.py not found")
+            else:
+                import concurrent.futures as cf
+                lod_executor = cf.ThreadPoolExecutor(max_workers=1)
+                lod_future = lod_executor.submit(run, [py, lscript, os.path.join(out, asset), "--res", "512"])
 
     # 3) preview
     prev = None
@@ -221,7 +293,7 @@ def main():
             lod["status"] = "PASS" if "LODCHECK PASS" in line else "FAIL"
             print(f"[lod] {line}")
             for l in lines_l:
-                if l.startswith(("HOLE", "NO_TEXTURE", "at gen")):
+                if l.startswith(("HOLE", "HOLE_SMALL", "NO_TEXTURE", "at gen", "WARN LOD")):
                     print("   " + l)
         else:
             why = next((l for l in reversed(lines_l) if ".blend" in l or "Blender" in l), "")
@@ -229,6 +301,12 @@ def main():
             print("[lod] NOT_CHECKED - needs FBX/.blend and Blender" + (f" ({why})" if why else ""))
     if lod_executor is not None:
         lod_executor.shutdown()
+    if "marginal=1" in (lod.get("line") or ""):
+        lod.setdefault("notes", []).append("LOD margin is close to the 0.05% limit")
+        print("[lod] WARN marginal - aim below 0.03% by closing the remaining silhouette gap")
+    if mode == "final":
+        write_cache(cache_path, dict(version=CACHE_VERSION, mesh_sig=mesh_sig,
+                                     fbx=fbx, lod=lod))
 
     reasons = []
     incomplete = []
