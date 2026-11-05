@@ -13,8 +13,15 @@
       "side": "front",
       "corners": [[220, 80], [980, 140], [975, 900], [230, 950]],
       "name": "front",
+      "wall_id": "main:edge_00",
       "size_m": [60, 45],
-      "_size_m": "optional, for tools/facade_paint.py: real width and height (m) of the wall part inside corners; x_m / z_m = where it lies on the wall",
+      "box": [-30, 30, 0, 0.5, 0, 45],
+      "confidence": "high",
+      "occluded": "left 2 bays behind trees",
+      "_wall_id": "optional: link to manifest.metadata.walls; its length/height/box/normal_deg are then used automatically",
+      "_yaw_deg": "optional explicit camera yaw; normally derived from the linked wall normal",
+      "_box": "optional generator-coordinate render box [x0,x1,y0,y1,z0,z1]; pivot shift is applied by the checker",
+      "_size_m": "optional real width/height (m) of the wall part inside corners; x_m / z_m = where it lies on the wall",
       "_corners_order": "that whole wall as seen in the photo: top-left, top-right, bottom-right, bottom-left (top = roof/parapet top, bottom = ground)"
     }
   ]

@@ -26,6 +26,8 @@ Blender를 자동으로 찾지 못하면 `INSTALL.md`의 수동 경로 설정을
 python tools/project.py new my-apt
 # 커튼월 건축물:
 python tools/project.py new my-apt --template cw
+# 상가·학교·비정형 볼륨:
+python tools/project.py new my-building --template generic
 ```
 
 이제 `projects/my-apt/`에서 다음을 준비합니다.
@@ -133,6 +135,8 @@ python tools/agent.py fix --project my-apt --generator my_apt_cs2.py --finish --
 - [전체 작업 절차](docs/agent/WORKFLOW.md)
 - [도구와 API](TOOLS_CLAUDE.md)
 - [상세 모델링 지침](docs/agent/MODELING.md)
+- [GLB 없는 사진 증거 작업](docs/agent/PHOTO_ONLY.md)
+- [상가·학교·비정형 볼륨](docs/agent/VOLUMES.md)
 - [메모리 범위](docs/agent/MEMORY.md)
 
 ## 알려진 한계

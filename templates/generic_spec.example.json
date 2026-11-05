@@ -1,0 +1,91 @@
+{
+  "volumes": [
+    {
+      "id": "main",
+      "footprint": [[0, 0], [24, 0], [24, 10], [0, 10]],
+      "height": 12,
+      "wall": "wall",
+      "roof": "roof",
+      "wall_ids": ["main:front", "main:right", "main:back", "main:left"]
+    },
+    {
+      "id": "gym",
+      "footprint": [[24, 2], [34, 4], [34, 12], [24, 10]],
+      "height": 7,
+      "wall": "wall",
+      "roof": "roof",
+      "wall_ids": ["gym:angled", "gym:right", "gym:back", "gym:shared"]
+    }
+  ],
+  "openings": [
+    {
+      "type": "shopfront",
+      "wall": "main:front",
+      "u0": 0.08,
+      "u1": 0.92,
+      "z0": 0.2,
+      "z1": 2.8,
+      "bays": 6,
+      "sign_z": [3.15, 3.75],
+      "canopy_index": 0
+    },
+    {
+      "type": "window_band",
+      "wall": "main:front",
+      "u0": 0.08,
+      "u1": 0.92,
+      "z0": 4.4,
+      "z1": 6.2,
+      "bays": 8,
+      "floor": 1,
+      "unit": 0
+    },
+    {
+      "type": "window_band",
+      "wall": "main:front",
+      "u0": 0.08,
+      "u1": 0.92,
+      "z0": 8.0,
+      "z1": 10.2,
+      "bays": 8,
+      "floor": 2,
+      "unit": 0
+    },
+    {
+      "type": "window_band",
+      "wall": "gym:angled",
+      "u0": 0.12,
+      "u1": 0.88,
+      "z0": 3.0,
+      "z1": 5.5,
+      "bays": 3,
+      "floor": 0,
+      "unit": 1
+    },
+    {
+      "type": "louver_zone",
+      "wall": "main:right",
+      "u0": 0.3,
+      "u1": 0.7,
+      "z0": 1.0,
+      "z1": 3.0
+    }
+  ],
+  "attachments": [
+    {
+      "type": "roof_equipment",
+      "volume": "gym",
+      "size": [2.0, 1.5],
+      "height": 1.0
+    },
+    {
+      "type": "railing_zone",
+      "wall": "gym:right",
+      "u0": 0.1,
+      "u1": 0.9,
+      "z0": 7.1,
+      "z1": 8.0,
+      "glass": true
+    }
+  ]
+}

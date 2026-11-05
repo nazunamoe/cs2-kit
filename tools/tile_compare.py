@@ -45,9 +45,9 @@ def p(s):
     sys.stdout.write(s.encode("ascii", "backslashreplace").decode("ascii") + "\n")
 
 
-def model_crop(meshes, tex, yaw, pitch, size):
+def model_crop(meshes, tex, yaw, pitch, size, box=None):
     from elevation_cache import model_crop as cached_crop
-    return cached_crop(meshes, tex, yaw, pitch, size)
+    return cached_crop(meshes, tex, yaw, pitch, size, box=box)
 
 
 def near(mask, tol):

@@ -51,9 +51,9 @@ def p(s):
     sys.stdout.write(s.encode("ascii", "backslashreplace").decode("ascii") + "\n")
 
 
-def model_view(meshes, tex, yaw, pitch):
+def model_view(meshes, tex, yaw, pitch, box=None):
     from elevation_cache import model_crop
-    return model_crop(meshes, tex, yaw, pitch), None
+    return model_crop(meshes, tex, yaw, pitch, box=box), None
 
 
 def extents(meshes, side):
@@ -62,6 +62,38 @@ def extents(meshes, side):
     d = V[:, 1].max() - V[:, 1].min()
     h = V[:, 2].max()
     return (w if side in ("front", "back", "top") else d), (d if side == "top" else h)
+
+
+def wall_measure(ref, meshes, side, manifest=None):
+    wall_id = ref.get("wall_id")
+    walls = ((manifest or {}).get("metadata") or {}).get("walls", {})
+    wall = walls.get(wall_id, {}) if wall_id else {}
+    if wall_id and not wall and not (ref.get("size_m") and ref.get("box")):
+        raise KeyError(f"wall_id '{wall_id}' is absent from manifest.metadata.walls")
+    if ref.get("size_m"):
+        width, height = map(float, ref["size_m"])
+    elif wall:
+        width = float(wall.get("length_m", abs(wall.get("a1", 0) - wall.get("a0", 0))))
+        height = float(wall.get("z1", 0) - wall.get("z0", 0))
+    else:
+        width, height = extents(meshes, side)
+    box = ref.get("box") or wall.get("box")
+    if box:
+        box = list(map(float, box))
+        shift = (manifest or {}).get("pivot_shift", [0.0, 0.0])
+        box[0] += shift[0]; box[1] += shift[0]
+        box[2] += shift[1]; box[3] += shift[1]
+    return width, height, box
+
+
+def wall_yaw(ref, side, manifest=None):
+    if "yaw_deg" in ref:
+        return float(ref["yaw_deg"])
+    walls = ((manifest or {}).get("metadata") or {}).get("walls", {})
+    wall = walls.get(ref.get("wall_id"), {})
+    if "normal_deg" in wall:
+        return 180.0 - float(wall["normal_deg"])
+    return YAW[side]
 
 
 def gray(im):
@@ -173,14 +205,14 @@ def check_satellite(ref, meshes, tex, base, prepared=None):
     return out
 
 
-def check_facade(ref, meshes, tex, base, prepared=None):
+def check_facade(ref, meshes, tex, base, prepared=None, manifest=None):
     side = ref.get("side", "front")
-    Wm, Hm = extents(meshes, side)
+    Wm, Hm, box = wall_measure(ref, meshes, side, manifest)
     if prepared is None:
         w, h = int(Wm * PX_PER_M), int(Hm * PX_PER_M)
         img = Image.open(os.path.join(base, ref["file"])).convert("RGB")
         photo = warp(img, ref["corners"], w, h)
-        model, _ = model_view(meshes, tex, YAW[side], 0)
+        model, _ = model_view(meshes, tex, wall_yaw(ref, side, manifest), 0, box=box)
         model = model.resize((w, h))
     else:
         photo, model = prepared
@@ -195,6 +227,8 @@ def check_facade(ref, meshes, tex, base, prepared=None):
                     (" (model needs MORE floors or lower floor height)" if fp < fm else " (model needs FEWER floors or taller floors)")
         if min(sp, sm) < 0.15:
             line = line.replace("MISMATCH", "INFO    ") + " (weak pattern in photo or model - LOW_CONFIDENCE, check by eye)"
+        if ref.get("confidence") == "low":
+            line = line.replace("MISMATCH", "INFO    ") + " (low-confidence photo evidence - do not auto-change floors)"
     out.append(line)
     bp, sbp = period(cols_profile(gp), PX_PER_M, 1.5, 12.0)
     bm, _ = period(cols_profile(gm), PX_PER_M, 1.5, 12.0)
@@ -221,7 +255,7 @@ def main():
         p("[photo] FAIL: photo_refs.json contains no satellite or facade checks")
         sys.exit(2)
     base = os.path.dirname(os.path.abspath(a.refs))
-    asset, meshes, texdir, _ = load_asset(a.path)
+    asset, meshes, texdir, manifest = load_asset(a.path)
     tex = Tex(texdir, asset, False, "color")
     lines = []
     failed = []
@@ -233,7 +267,7 @@ def main():
             lines.append(f"INFO     satellite check failed: {e}")
     for ref in refs.get("facades", []):
         try:
-            lines += check_facade(ref, meshes, tex, base)
+            lines += check_facade(ref, meshes, tex, base, manifest=manifest)
         except Exception as e:  # noqa
             failed.append(str(ref.get("side")))
             lines.append(f"INFO     facade {ref.get('side')} check failed: {e}")
