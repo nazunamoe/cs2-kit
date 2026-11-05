@@ -109,6 +109,7 @@ def main():
     ap.add_argument("--label", default="", help="short step name for the progress image, e.g. windows")
     ap.add_argument("--mode", choices=("quick", "visual", "final"), help="quick=OBJ/check, visual=OBJ/render/photo, final=FBX/full checks")
     ap.add_argument("--strict", action="store_true", help="fail or mark incomplete when a required final check did not run")
+    ap.add_argument("--backface-check", action="store_true", help="run the CPU backface/silhouette pre-check")
     a = ap.parse_args()
     mode = a.mode or ("final" if a.full else "quick" if a.no_render else "visual")
     if mode == "quick":
@@ -165,6 +166,20 @@ def main():
         for e in lst:
             ex = "; ".join(str(x) for x in e["examples"][:a.list])
             print(f"   {tag} {e['msg']}" + (f"  e.g. {ex}" if ex else ""))
+
+    backface_status = "NOT_CHECKED"
+    if a.backface_check:
+        code, log = run([py, os.path.join(HERE, "backface_check.py"),
+                         os.path.join(out, asset), "--res", "128"])
+        line = next((l.strip() for l in log.splitlines() if l.strip().startswith("BACKFACE ")), None)
+        if line:
+            backface_status = "PASS" if "BACKFACE PASS" in line else "FAIL"
+            print(f"[backface] {line}")
+        else:
+            backface_status = "FAIL"
+            print("[backface] FAIL - no result line")
+            for l in log.splitlines()[-6:]:
+                print("   " + l)
 
     # 1b) FBX/LOD cache: mesh-only signature; texture/paint edits reuse both
     asset_dir = os.path.join(out, asset)
@@ -320,6 +335,8 @@ def main():
         reasons.append("photo=FAIL")
     if tiles["status"] == "FAIL":
         reasons.append("tiles=FAIL")
+    if a.backface_check and backface_status == "FAIL":
+        reasons.append("backface=FAIL")
     if lod["status"] == "FAIL":
         reasons.append("lod=FAIL")
     if a.strict:
@@ -359,7 +376,10 @@ def main():
         if parent:
             os.makedirs(parent, exist_ok=True)
         checks = dict(build="PASS", geometry="FAIL" if r["errors"] else "PASS", preview=preview_status,
-                      photo=photo_status, tiles=tiles["status"], lod=lod["status"], fbx="PASS" if fbx else "NOT_CREATED")
+                      photo=photo_status, tiles=tiles["status"], lod=lod["status"],
+                      fbx="PASS" if fbx else "NOT_CREATED")
+        if a.backface_check:
+            checks["backface"] = backface_status
         with open(jp, "w", encoding="utf-8") as f:
             json.dump(dict(status=gate, project=NAME, generator=os.path.basename(a.generator), mode=mode,
                            checks=checks, errors=r["errors"], next_action=next_action,

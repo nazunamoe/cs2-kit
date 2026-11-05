@@ -1356,6 +1356,54 @@ def _read_png(path):
 # =============================================================================
 # 창문
 # =============================================================================
+def wall_window_layout(length, spec=None):
+    """Length-based window bays with optional per-wall overrides.
+
+    spec keys: kind ("windows" or "blank"), bays, width, margin, min_width, gap.
+    Returns (spans, gaps), where spans are (s0, s1, width) and gaps are
+    (centre, width).  This is the table-friendly version used by facade edits:
+
+        WALL_WINDOWS = {
+            "mass_01_00:edge_06": dict(bays=3, width=1.20, margin=0.45),
+            "mass_01_00:edge_10": dict(bays=2, width=0.80, margin=0.20),
+            "mass_01_00:edge_05": dict(kind="blank"),
+        }
+        spans, gaps = K.wall_window_layout(wall["length_m"],
+                                           WALL_WINDOWS.get(wall["wall_id"]))
+    """
+    spec = dict(spec or {})
+    if spec.get("kind") in ("blank", "none", "solid"):
+        return [], []
+    length = float(length)
+    if length < 1.45:
+        return [], []
+    margin = float(spec.get("margin", min(0.55, max(0.22, length * 0.06))))
+    usable = length - 2.0 * margin
+    if usable < 1.0:
+        return [], []
+    width = float(spec.get("width", 1.85))
+    min_width = float(spec.get("min_width", 0.90))
+    bays = spec.get("bays")
+    if bays is None:
+        bays = max(1, int(round(usable / float(spec.get("target_pitch", 2.75)))))
+    bays = max(1, int(bays))
+    gap = float(spec.get("gap", 0.30))
+    ww = min(width, (usable - (bays - 1) * gap) / bays)
+    if ww < min_width:
+        bays = 1
+        ww = min(width, usable)
+    pitch = usable / bays
+    spans = []
+    for i in range(bays):
+        c = margin + pitch * (i + 0.5)
+        spans.append((c - ww / 2.0, c + ww / 2.0, ww))
+    gaps = []
+    for i in range(len(spans) - 1):
+        g0, g1 = spans[i][1], spans[i + 1][0]
+        gaps.append(((g0 + g1) / 2.0, g1 - g0))
+    return spans, gaps
+
+
 class WindowSet:
     """창문 면 모음. add() 로 창(바깥에서 본 왼쪽 아래부터 반시계 4점)을 넣고, 같은 세대·층(unit, floor)끼리 묶어 UV 배정."""
 

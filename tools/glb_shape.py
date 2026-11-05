@@ -218,6 +218,28 @@ def explicit_groups(V, F, levels, height, tolerance, min_area, max_points, warni
     return groups
 
 
+def tier_hint(volume, height):
+    """Conservative role hint; roof equipment/solar still needs photo confirmation."""
+    z0 = float(volume["z0"])
+    h = float(volume["height"])
+    ring = volume["footprint"]
+    area = abs(ring_area(ring))
+    xs = [p[0] for p in ring]
+    ys = [p[1] for p in ring]
+    mind = min(max(xs) - min(xs), max(ys) - min(ys))
+    if z0 < height * 0.85:
+        return "mass", True
+    if h <= 0.9:
+        return "parapet", True
+    if mind < 0.9:
+        return "screen", True
+    if area >= 20.0 and h >= 3.0:
+        return "roof_mass", True
+    if area >= 20.0 or area < 6.0:
+        return "equipment", False
+    return "roof_mass", True
+
+
 def draw_preview(path, volumes, warnings):
     from PIL import Image, ImageDraw
     all_points = [p for v in volumes for p in v["footprint"]]
@@ -363,9 +385,14 @@ def main():
         if z1 <= z0:
             raise SystemExit("non-positive automatic height interval; use explicit --levels after inspecting the scan")
         for j, shape in enumerate(group["shape"]):
-            volumes.append({"id": f"mass_{i:02d}_{j:02d}", "footprint": shape["ring"],
-                            "height": round(z1 - z0, 3), "z0": round(z0, 3),
-                            "wall": args.wall, "roof": args.roof})
+            volume = {"id": f"mass_{i:02d}_{j:02d}", "footprint": shape["ring"],
+                      "height": round(z1 - z0, 3), "z0": round(z0, 3),
+                      "wall": args.wall, "roof": args.roof}
+            role, keep_solid = tier_hint(volume, height)
+            volume.update(role=role, keep_solid=keep_solid, source_section_z=round(z0, 3))
+            volumes.append(volume)
+            if role == "equipment":
+                warnings.append(f"{volume['id']}: roof tier looks like equipment/solar; verify photos before keeping it solid")
     if len(groups) > 12:
         warnings.append("many section changes detected; scan noise or facade slabs may have created extra mass tiers")
     if any(len(v["footprint"]) >= args.max_points for v in volumes):
@@ -397,7 +424,8 @@ def main():
     report_data = {"status": "OK", "measured_height_m": round(height, 3), "volume_count": len(volumes),
                    "section_count": len(groups), "warnings": warnings,
                    "volumes": [{"id": v["id"], "z0": v["z0"], "z1": round(v["z0"] + v["height"], 3),
-                                "points": len(v["footprint"])} for v in volumes]}
+                                "points": len(v["footprint"]), "role": v.get("role"),
+                                "keep_solid": v.get("keep_solid")} for v in volumes]}
     os.makedirs(os.path.dirname(report) or ".", exist_ok=True)
     with open(report, "w", encoding="utf-8") as f:
         json.dump(report_data, f, ensure_ascii=False, indent=2)
