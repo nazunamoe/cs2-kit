@@ -39,6 +39,8 @@ Check the environment at any time:
 python tools/agent.py doctor --project my-apt --json
 ```
 
+Optional Naver VR capture also needs `pip install playwright` and Chrome running with remote debugging port 9222. See `docs/agent/NAVER_VR.md`; Blender is not used for VR capture or `make_refs`.
+
 ## Upgrade
 
 Overwrite kit files with the new distribution, including `.claude/`. Keep `projects/` and `memory/`; they contain user work and are not part of the base distribution. Back them up before major upgrades.

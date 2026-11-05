@@ -45,6 +45,8 @@ Follow the compact JSON `next_action`; do not dump full logs. `NOT_CHECKED` is u
 
 Use `agent.py photos` contact-sheet pages before opening individual images. Record observations with `agent.py observe`; unchanged observed photos need not be read again. Crop only ambiguous regions. If image input is unavailable, say so and use supplied `photo_refs.json`; never invent visual findings.
 
+For Naver VR captures, use `capture/naver_vr.py make_refs --debug` and `docs/agent/NAVER_VR.md`. Keep refs planar: do not homography-warp a wall group with depth or angle changes. Exclude windows, trees, signs, shadows, and mixed surfaces from paint samples. Inspect `_mask.png`; `cell_id=-1` means unknown and must remain unpainted.
+
 Build order: mass -> windows -> facade parts -> roof -> LOD -> textures -> YAML -> final. Fix mass ratio and floor pitch before detail. A repeated mismatch gets at most three attempts; then record its evidence and reason under `photo_mismatch_notes`.
 
 For scoped changes use `agent.py fix ... --request ... --box=...`, edit, then the returned `--finish` command. The finish gate includes outside-scope mesh comparison.
