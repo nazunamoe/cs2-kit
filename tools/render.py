@@ -15,6 +15,8 @@ render.py — Blender 없이 미리보기 PNG (numpy 래스터라이저, 정사�
 옵션: --size 900x700, --mode color|normal|ctrl|emissive (텍스처 종류 확인), --night (발광만 밝게), --nolabel
 """
 import argparse
+import glob
+import hashlib
 import math
 import os
 import sys
@@ -34,7 +36,7 @@ except Exception:
 SKY = np.array([0.84, 0.90, 0.97])
 WINC = np.array([0.33, 0.45, 0.56])
 GLS = np.array([0.55, 0.75, 0.78])
-PRESET = {"front": (0, 8), "back": (180, 8), "left": (-90, 8), "right": (90, 8), "iso": (-35, 22), "iso2": (35, 22),
+PRESET = {"front": (0, 8), "back": (180, 8), "left": (90, 8), "right": (-90, 8), "iso": (-35, 22), "iso2": (35, 22),
           "iso3": (145, 22), "iso4": (-145, 22), "top": (0, 89.5), "lod1": (-35, 22), "lod2": (-35, 22)}
 
 
@@ -58,7 +60,8 @@ class Tex:
         self.H, self.W = self.img.shape[:2]
 
 
-def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=False, label=True):
+def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=False,
+           label=True, cull=False, mask=False):
     T, UV, KIND = [], [], []
     for mesh, kind in parts:
         if mesh is None:
@@ -74,6 +77,16 @@ def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=Fa
     if not T:
         return Image.new("RGB", size, "white")
     T = np.array(T); UV = np.array(UV); KIND = np.array(KIND)
+    if cull:
+        d = np.array([-math.sin(math.radians(yaw)) * math.cos(math.radians(pitch)),
+                      -math.cos(math.radians(yaw)) * math.cos(math.radians(pitch)),
+                      math.sin(math.radians(pitch))])
+        n0 = np.cross(T[:, 1] - T[:, 0], T[:, 2] - T[:, 0])
+        front = (n0 @ d) > 0
+        keep = np.nonzero(front)[0]
+        T, UV, KIND = T[keep], UV[keep], KIND[keep]
+        if not len(T):
+            return Image.new("RGB", size, "black" if mask else "white")
     yw, pt = math.radians(yaw), math.radians(pitch)
     cy, sy, cp, sp = math.cos(yw), math.sin(yw), math.cos(pt), math.sin(pt)
     Pm = T @ np.array([[cy, -sy, 0], [sy, cy, 0], [0, 0, 1]]).T
@@ -88,7 +101,9 @@ def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=Fa
         f, fx, fz = zoom
         cx0 = x.min() + (x.max() - x.min()) * fx; cz0 = z.min() + (z.max() - z.min()) * fz; sc *= f
     X = (x - cx0) * sc + W / 2; Y = H / 2 - (z - cz0) * sc
-    img = np.ones((H, W, 3)) * (SKY * (0.2 if night else 1)); zb = np.full((H, W), np.inf)
+    img = (np.zeros((H, W, 3)) if mask else
+           np.ones((H, W, 3)) * (SKY * (0.2 if night else 1)))
+    zb = np.full((H, W), np.inf)
     order = list(np.nonzero(KIND != "glass")[0]) + list(np.nonzero(KIND == "glass")[0])
     for i in order:
         xa, ya, da = X[i], Y[i], dpt[i]
@@ -110,6 +125,11 @@ def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=Fa
         dep = w0 * da[0] + w1 * da[1] + w2 * da[2]
         sub = zb[y0:y1 + 1, x0:x1 + 1]
         reg = img[y0:y1 + 1, x0:x1 + 1]
+        if mask:
+            upd = m & (dep < sub)
+            sub[upd] = dep[upd]
+            reg[upd] = 1.0
+            continue
         if KIND[i] == "window":
             col = np.broadcast_to((np.array([1.0, 0.85, 0.55]) * 0.8 if night else WINC * shade[i]), gx.shape + (3,))
         elif KIND[i] == "glass":
@@ -180,6 +200,33 @@ def _view_job(arg):
     return render(parts, tex, yaw, pitch, size, title, zoom, box, night, label)
 
 
+def _file_sha(h, path):
+    h.update(os.path.basename(path).encode("utf-8"))
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(block)
+
+
+RENDER_CACHE_VERSION = 2
+
+
+def render_cache_key(args):
+    """Hash render inputs; texture-only changes invalidate, identical rerenders hit."""
+    h = hashlib.sha256()
+    for value in (str(RENDER_CACHE_VERSION), args.views, args.size, args.zoom or "", args.box or "", args.mode,
+                  str(args.night), str(args.nolabel), os.path.abspath(args.path)):
+        h.update(value.encode("utf-8"))
+    path = os.path.abspath(args.path)
+    asset_dir = path if os.path.isdir(path) else os.path.dirname(path)
+    files = sorted(glob.glob(os.path.join(asset_dir, "*.png")) +
+                   glob.glob(os.path.join(asset_dir, "_check", "*.obj")))
+    for f in files:
+        _file_sha(h, f)
+    if args.photo and os.path.isfile(args.photo):
+        _file_sha(h, os.path.abspath(args.photo))
+    return h.hexdigest()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("path")
@@ -192,7 +239,20 @@ def main():
     ap.add_argument("--mode", default="color", choices=["color", "normal", "ctrl", "emissive"])
     ap.add_argument("--night", action="store_true")
     ap.add_argument("--nolabel", action="store_true")
+    ap.add_argument("--no-cache", action="store_true")
     a = ap.parse_args()
+    cache_dir = os.path.join(proj.ROOT, "previews", "_render_cache")
+    cache_file = None
+    if not a.no_cache:
+        try:
+            cache_file = os.path.join(cache_dir, render_cache_key(a) + ".png")
+            if os.path.isfile(cache_file):
+                os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+                Image.open(cache_file).save(a.out)
+                print(f"[render] cached {a.out}")
+                return
+        except Exception:
+            cache_file = None
     asset, M, texdir, man = load_asset(a.path)
     size = tuple(int(s) for s in a.size.lower().split("x"))
     zoom = tuple(float(s) for s in a.zoom.split(",")) if a.zoom else None
@@ -237,6 +297,12 @@ def main():
         sheet.paste(im, (x, 0)); x += im.size[0]
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     sheet.save(a.out)
+    if cache_file:
+        try:
+            os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+            sheet.save(cache_file)
+        except Exception:
+            pass
     print(f"[render] {a.out}  ({Wt}x{Ht}, {len(ims)} views)")
 
 
