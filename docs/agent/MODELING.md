@@ -36,6 +36,8 @@ Use photo-derived colors and repeating material units. Avoid windows, signs, peo
 
 Do not rely on raw color distance under different illumination. Use same-L comparison for different photos, raw ratios within the same photo, and a same-material control surface. Also compare whole-wall area ratios so brightness normalization cannot hide a wrong paint region.
 
+For `band_scan.py`, exclude windows and `paint_exclude` regions before clustering. Keep observed Lab lightness within one photo; do not flatten different paints to one L. Inspect `_mask.png` and leave `cell_id=-1` unknown. For Naver VR, use exact planar refs from `docs/agent/NAVER_VR.md` rather than warping merged non-coplanar wall groups.
+
 ## Review
 
 At mass, windows, and final checkpoints, compare both numbers and images. Inspect only flagged tiles and ambiguous details. Low recall can come from trees, shadows, blur, or perspective; record such evidence instead of endlessly changing geometry.

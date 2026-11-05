@@ -841,7 +841,8 @@ def apply_facade_paint_grid(mb, atlas, wall_meta, paint_grid, palette, layer_bas
     """band_scan.py 의 paint_grid.json 결과를 벽에 칠한다 (실제 메시 분할이 아니라 K.paint 오버레이 —
     PROPOSAL_pipeline_v2.md 의 A안). wall_meta: dict(axis,c,s,row_z=[...], col_a=[...]) — row_z/col_a 는
     그리드 행/열 경계를 실제 z/벽 거리(a)로 준 목록(len = rows+1 / cols+1). palette 의 색은 atlas 에
-    없으면 "paintgrid_<id>" 이름으로 자동 등록한다. 반환: 실제로 칠한 사각형 목록(디버그/보고용)."""
+    없으면 "paintgrid_<id>" 이름으로 자동 등록한다. cell_id=-1 의 미확정 칸은 칠하지 않고
+    기본 벽 재질로 남긴다. 반환: 실제로 칠한 사각형 목록(디버그/보고용)."""
     row_z, col_a = wall_meta["row_z"], wall_meta["col_a"]
     rows, cols = paint_grid["rows"], paint_grid["cols"]
     cell_id = paint_grid["cell_id"]
@@ -855,6 +856,8 @@ def apply_facade_paint_grid(mb, atlas, wall_meta, paint_grid, palette, layer_bas
     layer = layer_base
     painted = []
     for (r0, r1, c0, c1, label) in rects:
+        if label < 0:
+            continue
         a0, a1 = col_a[c0], col_a[c1 + 1]
         z0, z1 = row_z[r0], row_z[r1 + 1]
         region = "paintgrid_%s" % label
