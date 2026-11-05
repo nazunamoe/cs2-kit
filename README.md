@@ -36,6 +36,50 @@ python tools/project.py new my-building --template generic
 2. `TASK.md`에 아는 정보를 적고, 모르는 값은 비워 둡니다.
 3. 실제 단지 이름·브랜드·로고는 에셋 이름과 텍스처에 사용하지 않습니다.
 
+### GLB 없이 사진으로 작업
+
+`tools/evidence.py`는 사진과 관찰값을 벽에 연결합니다. 사진의 촬영 방향, 가림, 사용 가능한 측정 항목, 출처 해시, 신뢰도를 기록하고, 창은 전체 이미지 픽셀 대신 벽 기준 U/V 좌표로 저장합니다.
+
+```bash
+python tools/agent.py evidence --project my-apt --json -- photo \
+  --photo photos/front.jpg --photo-id front_main --wall main:front \
+  --view frontal --use floors,bays,color --confidence high --note "full wall"
+
+python tools/agent.py evidence --project my-apt --json -- feature \
+  --wall main:front --kind window --u 0.12,0.19 --v 0.20,0.78 \
+  --floor 7 --photo-id front_main --confidence high --note "measured edges"
+
+python tools/agent.py evidence --project my-apt --json -- validate
+```
+
+기록은 `work/photo_evidence.json`에 저장됩니다. 저신뢰도 측정값은 `estimated`로 표시해야 합니다.
+
+`photo_refs.json`의 벽 항목은 다음을 지원합니다.
+
+- `wall_id`: `manifest.metadata.walls`의 실제 벽과 연결
+- `size_m`: 네 모서리 안 벽의 실제 폭·높이
+- `box`: 해당 벽만 렌더하는 generator 좌표 영역
+- `yaw_deg`: 필요한 경우 카메라 각도 직접 지정
+- `confidence`, `occluded`: 판정 신뢰도와 가림 기록
+
+벽의 `normal_deg`에서 비축정렬 벽의 카메라 yaw를 계산하고, pivot shift를 적용합니다. 따라서 돌출되거나 들어간 벽도 전체 건축물 크기가 아닌 실제 벽 영역으로 비교합니다. 저신뢰도 사진이나 약한 패턴은 자동 층수 변경 지시를 만들지 않습니다.
+
+단독 정면 사진으로 깊이와 가려진 형상을 확정할 수는 없습니다. 이런 값은 추정치로 남기고, 가능하면 사선 사진이나 다른 각도로 검증합니다.
+
+### 상가·학교·비정형 건축물
+
+`--template generic`은 아파트 전용 프리셋 대신 **여러 볼륨과 벽 단위 부품을 조합**합니다. `generic_spec.json`에 다음을 입력합니다.
+
+- 임의의 단순 다각형 footprint, 볼륨별 높이와 시작 높이
+- 벽별 `window_band`, `shopfront`, `louver_zone`, `railing_zone`
+- `sign_slot`, `roof_equipment`, `covered_link`, `entrance_canopy`
+
+`build_volume_spec`이 같은 데이터를 FULL/SIMPLIFY_TRIM/LOD_CULL로 생성하므로 LOD를 따로 설계하지 않아도 됩니다. LOD2에서도 여러 볼륨의 실루엣을 유지합니다.
+
+생성된 벽은 ID, 길이, 높이, 법선, render box를 `manifest.metadata.walls`에 기록하므로 사진 검사에 그대로 연결할 수 있습니다. 임의 다각형 지붕은 삼각형으로 분할하고, OBJ는 삼각형과 사각형의 꼭짓점 UV를 모두 지원합니다.
+
+`example_generic_cs2.py`와 `templates/generic_spec.example.json`은 본관과 각진 체육관을 조합한 합성 예제입니다. 이 예제의 quick, FBX, 사진, 타일, LOD, visual review를 모두 PASS로 확인했습니다. 곡면이나 매우 복잡한 접합은 여전히 custom generator가 필요합니다.
+
 ## 3. Claude Code로 실행
 
 키트 루트에서 Claude Code를 열고 실행합니다.
