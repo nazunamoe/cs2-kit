@@ -7,9 +7,9 @@ Run commands from the kit root. `agent.py` requires `--project`; lower-level too
 ```bash
 python tools/agent.py doctor --project P --json
 python tools/agent.py resume --project P --json
-python tools/agent.py cycle --project P --generator G --mode quick|visual|final --label STEP --json
-python tools/agent.py review --project P --status PASS|FAIL --note NOTE --json
-python tools/agent.py photos --project P --page 0 --page-size 30 --json
+python tools/agent.py cycle --project P --generator G --mode quick|visual|final --label STEP --brief --json
+python tools/agent.py review --project P --status PASS|FAIL|NEEDS_HUMAN_REVIEW --note NOTE --artifact PATH --json
+python tools/agent.py photos --project P --page 0 --page-size 16 --json
 python tools/agent.py observe --project P --photo photos/front.jpg --side front --note NOTE --json
 python tools/agent.py fix --project P --generator G --request TEXT --box=x0,x1,y0,y1,z0,z1 --json
 python tools/agent.py fix --project P --generator G --finish --json
@@ -26,12 +26,12 @@ python tools/cycle.py G --mode final --strict --label final --json
 ```
 
 - quick: normal Python OBJ build + `check.py`.
-- visual: OBJ + render + `photo_check.py` when refs exist.
-- final: Blender FBX + render + photo + tiles + full LOD + strict gate.
+- visual: OBJ + render + shared `visual_check.py` photo analysis when refs exist.
+- final: Blender FBX + render + shared photo/tile analysis + full LOD + strict gate. LOD runs concurrently with CPU visual checks.
 - Legacy `--no-render`, `--tiles`, and `--full` remain available.
-- Strict exit: 0 PASS, 1 FAIL, 2 INCOMPLETE. Non-strict legacy exit considers geometry errors only.
+- Strict exit: 0 PASS, 1 FAIL, 2 INCOMPLETE/NEEDS_HUMAN_REVIEW. Non-strict legacy exit considers geometry errors only.
 
-`GATE`/`gate.json` distinguish `PASS`, `FAIL`, `NOT_CHECKED`, and `NOT_APPLICABLE`. A photo-analysis exception is a failed check, not an informational success. `tools/qa/verify.py` is a compatibility wrapper around the same gate and adds optional same-camera regression checks. Its `--fast` mode is quick-only and not valid for a final report.
+`GATE`/`gate.json` distinguish `PASS`, `FAIL`, `NOT_CHECKED`, `NOT_APPLICABLE`, `PARTIAL`, and `NEEDS_HUMAN_REVIEW`. Empty refs are a failed configuration. A photo-analysis exception is a failed check. `tools/qa/verify.py` wraps the same gate and adds optional same-camera regression checks; `--fast` is quick-only and not valid for a final report.
 
 ## Geometry checks
 
@@ -66,7 +66,9 @@ python tools/tile_compare.py output/A --tile-m 6x5 --top 3
 
 Photo refs map road/satellite image corners to model walls. `photo_check` measures size/ratio/floor pitch and writes `previews/photo_check/`; exit 1=mismatch, 2=check failed. `tile_compare` writes heat maps and worst-tile sheets; its detail/color scores are advisory, while exit 2 means comparison failed.
 
-`photo_check` and `tile_compare` share `previews/elevation_cache/`. Cache keys include mesh, UV, textures, view, and size, so unchanged elevations render once. Inspect only flagged comparison images unless a full visual review is needed.
+`visual_check.py` loads the asset once, warps each photo once, and shares the elevation render between photo and tile metrics. Floor-pitch mismatch guidance requires usable photo and model patterns. Colour metrics use trusted tiles only; mixed, high-edge, and vegetation-heavy tiles are reported separately. `previews/elevation_cache/` computes mesh/texture fingerprints once per loaded asset and retains at most 64 images.
+
+Run `python tools/qa/lod_check.py --self-test` for the LOD baseline: a closed cube must PASS and an open-front cube must FAIL.
 
 ## Photo measurement and materials
 

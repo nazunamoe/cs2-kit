@@ -37,7 +37,7 @@ python tools/agent.py cycle --project <project> --generator <name>_cs2.py --mode
 - `visual`: OBJ + preview + photo checks when refs exist.
 - `final`: FBX + full photo/tile/LOD checks + strict gate.
 
-Follow the compact JSON `next_action`; do not dump full logs. `NOT_CHECKED` is unverified, `NOT_APPLICABLE` means no photo refs. After visual/final, inspect the current preview and flagged images, then run `agent.py review --status PASS|FAIL`. Final PASS requires this review.
+Follow the compact JSON `next_action`; do not dump full logs. `NOT_CHECKED` is unverified, `NOT_APPLICABLE` means no photo refs. After visual/final, inspect every artifact listed in `next_action` and run that exact review command. `PARTIAL` is not PASS; without image input use `NEEDS_HUMAN_REVIEW`.
 
 ## Photos
 

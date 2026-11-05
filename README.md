@@ -74,20 +74,20 @@ python tools/agent.py cycle --project my-apt --generator my_apt_cs2.py --mode fi
 - `NOT_APPLICABLE`: `photo_refs.json`이 없어 사진 검사 대상이 아닙니다.
 - `NOT_CHECKED`: 아직 검증하지 않았으며 PASS로 해석하면 안 됩니다.
 
-JSON의 `next_action`을 따르고, 상세 로그는 지정된 파일이 필요할 때만 읽습니다. visual/final 후에는 현재 미리보기와 표시된 비교 이미지를 확인하고 결과를 기록합니다.
+JSON의 `next_action`을 따르고, 상세 로그는 지정된 파일이 필요할 때만 읽습니다. visual/final 후에는 `next_action`에 열거된 현재 미리보기와 비교 이미지를 확인하고, 같은 artifact를 지정해 결과를 기록합니다.
 
 ```bash
-python tools/agent.py review --project my-apt --status PASS --note "reviewed final images" --json
+python tools/agent.py review --project my-apt --status PASS --note "reviewed final images" --artifact previews/<asset>.png --json
 ```
 
-이미지 입력이 없는 모델은 본 것처럼 기록하지 않고, 제공된 `photo_refs.json`과 수치 데이터를 사용합니다.
+사진 검사가 있으면 photo sheet도 `--artifact`로 지정합니다. 일부만 본 `PARTIAL`은 PASS가 아니며, 이미지를 볼 수 없는 모델은 `NEEDS_HUMAN_REVIEW`를 사용합니다.
 
 ## 5. 사진, 결과, 재개
 
 사진은 연락판 페이지 → 대표 사진 → 필요한 영역 확대 순서로 확인합니다. 관찰한 사진은 해시로 기록해 같은 이미지를 반복해서 읽지 않습니다.
 
 ```bash
-python tools/agent.py photos --project my-apt --page 0 --page-size 30 --json
+python tools/agent.py photos --project my-apt --page 0 --page-size 16 --json
 python tools/agent.py observe --project my-apt --photo photos/front.jpg --side front --note "36 floors" --json
 ```
 
