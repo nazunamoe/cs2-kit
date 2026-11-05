@@ -89,8 +89,9 @@ python tools/extract_texture.py photos/front.jpg --pts 812,402,1290,380,1302,905
 - `facade_paint.py floors|windows|paint|all`: reads one wall from `photo_refs.json`; verify generated images visually.
 - `facade_read.py`: normalized U/V facade output; v1, synthetic-image validation only.
 - `band_scan.py`: paint grid and palette; v1, verify against real photos before applying.
-- `glb_measure.py scan.glb --list`, then `--mesh`/`--box`: dimensions and elevations only.
-- `glb_slices.py`: wall segments from GLB slices; v1.
+- `glb_measure.py scan.glb --list`, then `--mesh`/`--box`: overall dimensions and elevations.
+- `glb_slices.py`: individual wall segments from explicit GLB slices; v1.
+- `glb_shape.py` / `agent.py glb-mass`: multi-height outer footprints, simplified polygon volumes, automatic or explicit height tiers, source provenance, and a review preview. See `docs/agent/GLB_MASS.md`.
 - `tools/samhan_facade/`: one legacy generator structure only; do not use on unrelated generators.
 
 Scans are measurement references. Never copy their geometry or textures into the asset.

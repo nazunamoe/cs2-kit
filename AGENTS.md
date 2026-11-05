@@ -23,6 +23,8 @@ python tools/agent.py resume --project <project> --json
 
 For a new building, a human or an explicit setup step runs `python tools/project.py new <project> [--template cw|generic]`. Use `generic` for data-driven mixed-use/school/irregular volumes. Read `TASK.md`, the selected generator, and `docs/agent/WORKFLOW.md`.
 
+When GLB/GLTF exists, use it for the mass before hand-drawing geometry. Run `agent.py glb-mass --project P --json -- photos/scan.glb --list`, select only building meshes, then generate `generic_spec.json` with `glb-mass`. Follow `docs/agent/GLB_MASS.md`. Use its simplified footprints, height tiers, source hash, and wall IDs; inspect `previews/glb/shape.png` and warnings. Never copy source triangles or textures. Photo evidence still controls openings and materials.
+
 Global memory is not a source of building-specific facts. Retrieve only relevant, scoped lessons using `docs/agent/MEMORY.md`. Keep current-building observations in project files.
 
 ## Gates and next actions
