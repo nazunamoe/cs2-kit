@@ -1,6 +1,6 @@
-# CS2 건축 에셋 키트 — Codex / Kimi Code
+# CS2 건축 에셋 키트 — DeepSeek via Codex
 
-사진과 건축 정보로 Cities: Skylines II 건축 에셋을 만드는 키트입니다. 이 브랜치는 **Codex와 Kimi Code가 공통으로 사용하는 `AGENTS.md`와 JSON 실행 엔진**을 제공합니다.
+사진과 건축 정보로 Cities: Skylines II 건축 에셋을 만드는 키트입니다. 이 브랜치는 **`deepseek-flash`의 이미지·도구 호출 기능과 Codex의 Responses API 연결**을 사용하며, 공통 생성기와 검증 엔진은 그대로 유지합니다.
 
 ## 1. 준비
 
@@ -9,6 +9,7 @@
 - Python 3.9 이상
 - `numpy`, `Pillow`
 - Blender 5.2 — FBX 생성과 최종 LOD 검사에 필요
+- Codex와 DeepSeek API 계정 — 공식 연결 방법은 [DeepSeek 안내](docs/agent/DEEPSEEK.md) 참조
 
 키트 루트에서 설치와 초기 설정을 실행합니다.
 
@@ -36,9 +37,11 @@ python tools/project.py new my-building --template generic
 2. `TASK.md`에 아는 정보를 적고, 모르는 값은 비워 둡니다.
 3. 실제 단지 이름·브랜드·로고는 에셋 이름과 텍스처에 사용하지 않습니다.
 
-## 3. Codex / Kimi Code로 실행
+## 3. DeepSeek를 Codex로 실행
 
-키트 루트에서 Codex 또는 Kimi Code를 엽니다. `AGENTS.md`의 작업 규칙을 따르게 하고, 첫 환경 점검을 실행합니다.
+[DeepSeek 연결 안내](docs/agent/DEEPSEEK.md)에 따라 Codex의 모델을 `deepseek-flash`로 설정합니다. API 키는 `TASK.md`, README, 로그 등 프로젝트 파일에 저장하지 않습니다. 설정 스크립트는 실행 전에 내용을 검토하고, 키트가 스크립트를 자동 실행하지는 않습니다.
+
+키트 루트에서 Codex를 열고 `AGENTS.md`를 따르게 합니다. 첫 환경 점검:
 
 ```bash
 python tools/agent.py doctor --project my-apt --json
@@ -49,8 +52,21 @@ python tools/agent.py doctor --project my-apt --json
 ```text
 AGENTS.md와 projects/my-apt/TASK.md를 읽고 프로젝트를 만들어줘.
 tools/agent.py의 next_action을 따라 quick/visual/final 검증을 진행하고,
-최종 gate와 이미지 review가 PASS일 때만 완료 보고를 해줘.
+require-final이 PASS일 때만 완료 보고를 해줘.
 ```
+
+작업별 reasoning 정책을 조회할 수 있습니다.
+
+```bash
+python tools/agent.py deepseek-policy --project my-apt --task data --json
+python tools/agent.py deepseek-policy --project my-apt --task geometry --json
+python tools/agent.py deepseek-policy --project my-apt --task vision --json
+```
+
+- `data`: non-thinking, 허용된 데이터만 수정
+- `edit`: low, 오류 그룹 하나만 수정
+- `geometry`, `vision`, `review`: high
+- 긴 문서와 로그를 모두 넣지 말고 `--brief`와 `next_action`을 사용
 
 모든 에이전트 명령은 `--project`를 명시합니다. `projects/.current`에 의존하지 않으므로 여러 세션에서도 작업 대상을 명확히 유지할 수 있습니다.
 
@@ -84,14 +100,25 @@ python tools/agent.py review --project my-apt --status PASS --note "reviewed fin
 
 사진 검사가 있으면 photo sheet도 `--artifact`로 지정합니다. 일부만 본 `PARTIAL`은 PASS가 아니며, 이미지를 볼 수 없는 모델은 `NEEDS_HUMAN_REVIEW`를 사용합니다.
 
+이 브랜치에는 Claude Stop 훅이 없으므로, 외부 실행기 또는 에이전트가 완료 전에 최종 상태를 확인합니다.
+
+```bash
+python tools/agent.py require-final --project my-apt --json
+```
+
+final gate, FBX, visual review가 모두 PASS일 때만 PASS를 반환합니다. 상태가 없으면 `NOT_CHECKED`, 실패는 `FAIL`, 미완료 review는 `INCOMPLETE`입니다.
+
 ## 5. 사진, 결과, 재개
 
-사진은 연락판 페이지 → 대표 사진 → 필요한 영역 확대 순서로 확인합니다. 관찰한 사진은 해시로 기록해 같은 이미지를 반복해서 읽지 않습니다.
+연락판은 사진 분류에만 사용하고, 창틀·난간·루버 측정은 벽 또는 세부 crop을 사용합니다. 관찰한 사진은 해시로 기록해 같은 이미지를 반복해서 읽지 않습니다.
 
 ```bash
 python tools/agent.py photos --project my-apt --page 0 --page-size 16 --json
 python tools/agent.py observe --project my-apt --photo photos/front.jpg --side front --note "36 floors" --json
+python tools/agent.py vision --project my-apt --photo photos/front.jpg --box=100,200,1200,1400 --wall-id main:front --json
 ```
+
+사람·번호판 등 민감한 영역은 `--redact=x0,y0,x1,y1`로 가립니다. 원본 사진은 바뀌지 않고 결과는 `previews/`에 저장됩니다. 키트는 사진을 자동으로 외부 업로드하지 않으므로, 전송 전에 파생 이미지를 직접 확인해야 합니다.
 
 주요 파일:
 
@@ -126,6 +153,7 @@ Windows에서는 PowerShell 7과 UTF-8을 권장합니다. 네이티브 편집�
 ## 7. 더 보기
 
 - [설치와 업그레이드](INSTALL.md)
+- [DeepSeek 모델·설정·정책](docs/agent/DEEPSEEK.md)
 - [전체 작업 절차](docs/agent/WORKFLOW.md)
 - [도구와 API](TOOLS.md)
 - [상세 모델링 지침](docs/agent/MODELING.md)
@@ -135,4 +163,4 @@ Windows에서는 PowerShell 7과 UTF-8을 권장합니다. 네이티브 편집�
 
 ## 알려진 한계
 
-미리보기는 단순 정사영 렌더라 게임의 색·밝기와 다릅니다. 사진 지표는 나무·그림자·원근에 취약하며, `facade_read.py`와 `band_scan.py`는 실제 사진 확인이 필요한 v1입니다. FBX와 LOD는 Blender 없이 완료할 수 없습니다. 최종 크기, 창, 알파, 야간 조명, 정면, 입구, 시그니처 등록은 게임에서 확인하세요.
+미리보기는 단순 정사영 렌더라 게임의 색·밝기와 다릅니다. 사진 지표는 나무·그림자·원근에 취약하며, `facade_read.py`와 `band_scan.py`는 실제 사진 확인이 필요한 v1입니다. FBX와 LOD는 Blender 없이 완료할 수 없습니다. 최종 크기, 창, 알파, 야간 조명, 정면, 입구, 시그니처 등록은 게임에서 확인하세요. DeepSeek의 실제 작업 완료율·토큰·시간은 모델 연결 후 별도로 측정해야 합니다.
