@@ -12,8 +12,10 @@ floor/window 탐지 자체는 facade_paint.py 와 완전히 같은 코드를 재
    "row_z": [z0..zR] (절대 높이, 오름차순), "col_a": [a0..aC] (벽 기준 가로 거리, 오름차순),
    "accent_bands": [...], "mixed_cells": [[r,c], ...], "raw_L_ratio": [[..],[..]]}
 
-주의: 아직 실제 사진으로 검증 안 됨(합성 이미지로만 실행 확인). 셀 표준편차가 높아 MIXED 로 빠진
-칸은 라벨을 "가까운 깨끗한 칸" 으로 채우되, palette 색 자체는 그 칸 때문에 바뀌지 않는다.
+창 마스크와 photo_refs 의 paint_include/paint_exclude 영역을 표본에서 제외한다. 각 영역은
+{"u": [0, 1], "v": [0, 1], "reason": "tree"} 형태이며 v는 항목 전체 아래=0, 위=1 이다.
+MIXED/저표본 칸은 cell_id=-1 로 남아 기본 벽 재질을 유지한다. 팔레트는 실제 Lab 명도를 보존한다.
+아직 실제 사진 검증은 필요하며 <name>_mask.png 에서 제외 영역을 눈으로 확인해야 한다.
 """
 import argparse
 import json
@@ -34,25 +36,49 @@ except Exception:
 MIXED_STD = 12.0   # 이보다 표준편차 높은 칸은 유리/그림자 혼입(MIXED)으로 뺀다
 
 
-def _robust_patch_median(patch):
-    """LESSONS.md 규칙: 박스 안에서 표준편차가 가장 낮은 부분으로 중앙값을 잡는다(배경 섞임 방지).
-    patch: (h, w, 3). 3x3 서브블록 중 표준편차 최소인 것을 골라 중앙값 반환 + 그 표준편차."""
+def _robust_patch_median(patch, allowed):
+    """Choose the least variable valid subblock; excluded pixels never affect colour or spread."""
     h, w, _ = patch.shape
-    if h < 6 or w < 6:
-        g = patch.reshape(-1, 3)
-        return np.median(g, 0), float(g.std())
+    coverage = float(allowed.mean()) if allowed.size else 0.0
+    if coverage < 0.25:
+        return np.zeros(3), float("inf"), coverage
     best = None
     for gy in range(3):
         for gx in range(3):
             y0, y1 = int(h * gy / 3), int(h * (gy + 1) / 3)
             x0, x1 = int(w * gx / 3), int(w * (gx + 1) / 3)
-            sub = patch[y0:y1, x0:x1].reshape(-1, 3)
-            if len(sub) < 4:
+            sub_mask = allowed[y0:y1, x0:x1]
+            if sub_mask.mean() < 0.45 or sub_mask.sum() < 4:
                 continue
-            sd = float(sub.std())
+            sub = patch[y0:y1, x0:x1][sub_mask]
+            sd = float(sub.std(axis=0).mean())
             if best is None or sd < best[1]:
                 best = (np.median(sub, 0), sd)
-    return best if best else (np.median(patch.reshape(-1, 3), 0), float(patch.std()))
+    if best is None:
+        values = patch[allowed]
+        return np.median(values, 0), float(values.std(axis=0).mean()), coverage
+    return best[0], best[1], coverage
+
+
+def entry_paint_mask(wall):
+    """Normalized wall U/V include/exclude regions -> warped-image boolean mask."""
+    entry = wall["entry"]
+    includes = entry.get("paint_include") or (entry.get("paint") or {}).get("include") or []
+    excludes = entry.get("paint_exclude") or (entry.get("paint") or {}).get("exclude") or []
+    mask = np.zeros((wall["H"], wall["W"]), bool) if includes else np.ones((wall["H"], wall["W"]), bool)
+
+    def apply(regions, value):
+        for region in regions:
+            u, v = region.get("u", [0, 1]), region.get("v", [0, 1])
+            x0 = max(0, min(wall["W"], int(round(float(u[0]) * wall["W"]))))
+            x1 = max(0, min(wall["W"], int(round(float(u[1]) * wall["W"]))))
+            y0 = max(0, min(wall["H"], int(round((1 - float(v[1])) * wall["H"]))))
+            y1 = max(0, min(wall["H"], int(round((1 - float(v[0])) * wall["H"]))))
+            mask[y0:y1, x0:x1] = value
+
+    apply(includes, True)
+    apply(excludes, False)
+    return mask
 
 
 def _dedup_boundaries(vals, min_gap):
@@ -94,15 +120,19 @@ def build_grid(wall, fl, T):
     return row_z, col_a
 
 
-def scan_cells(wall, row_z, col_a, k):
+def scan_cells(wall, row_z, col_a, allowed):
     arr = wall["arr"]
     H, W = wall["H"], wall["W"]
     ppm, z1 = wall["ppm"], wall["z1"]
     rows, cols = len(row_z) - 1, len(col_a) - 1
     meds = np.zeros((rows, cols, 3))
-    stds = np.full((rows, cols), 1e9)   # 퇴화 칸은 std=무한대로 둬서 반드시 MIXED 로 빠지게 함
+    stds = np.full((rows, cols), 1e9)
     raw_meds = np.zeros((rows, cols, 3))
+    coverage = np.zeros((rows, cols))
     valid = np.zeros((rows, cols), bool)
+    lab = FP.to_lab(arr)
+    vegetation = (lab[..., 1] < -8) & (lab[..., 2] > 8)
+    allowed = allowed & (arr.mean(2) > 30) & ~vegetation
     for r in range(rows):
         za, zb = row_z[r], row_z[r + 1]
         y0, y1 = int(round((z1 - zb) * ppm)), int(round((z1 - za) * ppm))
@@ -112,37 +142,39 @@ def scan_cells(wall, row_z, col_a, k):
             x0, x1 = max(0, min(x0, W - 1)), max(1, min(x1, W))
             if y1 <= y0 or x1 <= x0:
                 continue
-            patch = arr[y0:y1, x0:x1]
-            med, sd = _robust_patch_median(patch)
-            meds[r, c], stds[r, c] = med, sd
-            raw_meds[r, c] = np.median(patch.reshape(-1, 3), 0)
-            valid[r, c] = True
-    return meds, stds, raw_meds, valid
+            patch, patch_allowed = arr[y0:y1, x0:x1], allowed[y0:y1, x0:x1]
+            med, sd, cov = _robust_patch_median(patch, patch_allowed)
+            meds[r, c], stds[r, c], coverage[r, c] = med, sd, cov
+            if patch_allowed.any():
+                raw_meds[r, c] = np.median(patch[patch_allowed], 0)
+            valid[r, c] = cov >= 0.35
+    return meds, stds, raw_meds, valid, coverage
 
 
-def cluster_cells(meds, stds, k):
+def cluster_cells(meds, stds, valid, k):
     rows, cols, _ = meds.shape
-    mixed = stds > MIXED_STD
+    mixed = (stds > MIXED_STD) | ~valid
     clean = ~mixed
+    cell_id = np.full((rows, cols), -1, int)
+    if not clean.any():
+        return cell_id.tolist(), {}, mixed
     lab = FP.to_lab(meds)
-    ref_L = float(np.median(lab[clean][:, 0])) if clean.any() else float(np.median(lab[..., 0]))
-    norm_lab = lab.copy()
-    norm_lab[..., 0] = ref_L   # same-L: 조명 차이를 지우고 색(a,b)만으로 군집
-    flat = norm_lab[clean].reshape(-1, 3) if clean.any() else norm_lab.reshape(-1, 3)
-    kk = min(k, max(1, len(flat)))
-    cen = FP.kmeans_lab(flat, kk) if len(flat) >= kk else lab.reshape(-1, 3)[:kk]
-    full_norm = norm_lab.reshape(-1, 3)
-    d = np.linalg.norm(full_norm[:, None, :] - cen[None, :, :], axis=-1)
-    cell_id = d.argmin(1).reshape(rows, cols)
-    # 가까운 깨끗한 칸으로 MIXED 라벨을 메운다(팔레트 색 자체는 바꾸지 않음) - 단순 최근접 사본
-    if mixed.any() and clean.any():
-        cy, cx = np.where(clean)
-        for ry, rx in zip(*np.where(mixed)):
-            dd = (cy - ry) ** 2 + (cx - rx) ** 2
-            j = np.argmin(dd)
-            cell_id[ry, rx] = cell_id[cy[j], cx[j]]
+    flat = lab[clean]
+    kk = min(k, len(flat))
+    cen = FP.kmeans_lab(flat, kk)
+    distances = np.linalg.norm(flat[:, None, :] - cen[None, :, :], axis=-1)
+    cell_id[clean] = distances.argmin(1)
     palette = {str(i): FP.hexc(FP.from_lab(cen[i])) for i in range(len(cen))}
     return cell_id.tolist(), palette, mixed
+
+
+def save_mask_preview(wall, allowed, path):
+    from PIL import Image, ImageDraw
+    arr = np.asarray(np.clip(wall["arr"], 0, 255), np.uint8).copy()
+    arr[~allowed] = (0.4 * arr[~allowed] + 0.6 * np.array([230, 40, 40])).astype(np.uint8)
+    image = Image.fromarray(arr)
+    ImageDraw.Draw(image).text((5, 5), "red = excluded from paint samples", fill=(255, 255, 0))
+    image.save(path)
 
 
 def main():
@@ -156,6 +188,8 @@ def main():
     ap.add_argument("--k", type=int, default=4)
     ap.add_argument("--out", default="previews/paint_grid")
     a = ap.parse_args()
+    if a.k < 1:
+        raise SystemExit("--k must be positive")
 
     args = SimpleNamespace(refs=a.refs, name=a.name, wall_size=a.wall_size, ppm=a.ppm)
     wall = FP.load_wall(args)
@@ -164,16 +198,23 @@ def main():
     M, mode_info = FP.window_mask(S, wall, a.window_mode, quiet=True)
     T, iou, special = FP.build_windows(M)
     row_z, col_a = build_grid(wall, fl, T)
-    meds, stds, raw_meds, valid = scan_cells(wall, row_z, col_a, a.k)
-    cell_id, palette, mixed = cluster_cells(meds, stds, a.k)
+    allowed = entry_paint_mask(wall) & ~FP._dil(FP.mask_to_full(wall, fl, M), 2)
+    meds, stds, raw_meds, valid, coverage = scan_cells(wall, row_z, col_a, allowed)
+    cell_id, palette, mixed = cluster_cells(meds, stds, valid, a.k)
+    if not palette:
+        raise SystemExit("no reliable paint samples; inspect the ref plane, window mask, and paint_include/exclude regions")
     raw_L = FP.to_lab(raw_meds)[..., 0]
-    norm_L = FP.to_lab(meds)[..., 0]
-    raw_L_ratio = (raw_L / np.maximum(norm_L, 1e-6)).round(3).tolist()
+    reference_L = float(np.median(raw_L[~mixed]))
+    raw_L_ratio = (raw_L / max(reference_L, 1e-6)).round(3).tolist()
+    warnings = []
+    entry = wall["entry"]
+    if entry.get("confidence") == "low" or not (entry.get("paint") or {}).get("use_for_color", True):
+        warnings.append("low-confidence or oblique color source; verify palette against a frontal photo")
     accent = []
     rows = len(row_z) - 1
     for r in range(rows):
         labs_in_row = set(cell_id[r])
-        if len(labs_in_row) == 1:
+        if len(labs_in_row) == 1 and -1 not in labs_in_row:
             lbl = next(iter(labs_in_row))
             neigh = set()
             if r > 0:
@@ -185,13 +226,19 @@ def main():
     out = dict(rows=rows, cols=len(col_a) - 1, cell_id=cell_id, palette=palette,
                row_z=row_z, col_a=col_a, accent_bands=accent,
                mixed_cells=[[int(r), int(c)] for r, c in zip(*np.where(mixed))],
-               raw_L_ratio=raw_L_ratio, window_mode=mode_info)
+               sample_coverage=coverage.round(3).tolist(), raw_L_ratio=raw_L_ratio,
+               palette_mode="observed_lab_lightness_preserved", source_confidence=entry.get("confidence"),
+               warnings=warnings, review_required=True, window_mode=mode_info)
     os.makedirs(a.out, exist_ok=True)
     outp = os.path.join(a.out, "%s.json" % wall["name"])
+    maskp = os.path.join(a.out, "%s_mask.png" % wall["name"])
+    save_mask_preview(wall, allowed, maskp)
     with open(outp, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=1)
-    print("%s: %d rows x %d cols, %d colour(s) %s, %d mixed cell(s) -> %s" %
-          (wall["name"], out["rows"], out["cols"], len(palette), list(palette.values()), len(out["mixed_cells"]), outp))
+    for warning in warnings:
+        print("WARN " + warning)
+    print("%s: %d rows x %d cols, %d colour(s) %s, %d unknown/mixed cell(s) -> %s; mask %s" %
+          (wall["name"], out["rows"], out["cols"], len(palette), list(palette.values()), len(out["mixed_cells"]), outp, maskp))
 
 
 if __name__ == "__main__":

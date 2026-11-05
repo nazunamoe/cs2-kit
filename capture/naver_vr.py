@@ -395,6 +395,65 @@ def walls_of(xz, min_len=4.0, group_deg=20.0, depth_gap=3.0):
     return out
 
 
+def reference_walls_of(xz, grouped=None, min_len=1.0, angle_tol=2.0, offset_tol=0.05):
+    """Exact planar runs for homography refs; unlike walls_of, never bridges depth or angle changes."""
+    n = len(xz)
+    area2 = sum(xz[i][0] * xz[(i + 1) % n][1] - xz[(i + 1) % n][0] * xz[i][1] for i in range(n))
+    sgn = 1.0 if area2 > 0 else -1.0
+    edges = []
+    for i in range(n):
+        a, b = xz[i], xz[(i + 1) % n]
+        length = math.hypot(b[0] - a[0], b[1] - a[1])
+        if length < 0.05:
+            continue
+        nx, nz = sgn * (b[1] - a[1]) / length, -sgn * (b[0] - a[0]) / length
+        edges.append({"i": i, "a": a, "b": b, "L": length, "n": (nx, nz),
+                      "off": ((a[0] + b[0]) / 2 * nx + (a[1] + b[1]) / 2 * nz)})
+    runs = []
+    cos_tol = math.cos(math.radians(angle_tol))
+    for edge in edges:
+        if runs:
+            base = runs[-1]["base"]
+            if edge["n"][0] * base["n"][0] + edge["n"][1] * base["n"][1] >= cos_tol \
+                    and abs(edge["off"] - base["off"]) <= offset_tol:
+                runs[-1]["edges"].append(edge)
+                continue
+        runs.append({"base": edge, "edges": [edge]})
+    if len(runs) > 1:
+        first, last = runs[0]["base"], runs[-1]["base"]
+        if first["n"][0] * last["n"][0] + first["n"][1] * last["n"][1] >= cos_tol \
+                and abs(first["off"] - last["off"]) <= offset_tol:
+            runs[0]["edges"] = runs[-1]["edges"] + runs[0]["edges"]
+            runs.pop()
+    out = []
+    for run in runs:
+        base = run["base"]
+        nx, nz = base["n"]
+        tx, tz = -nz, nx
+        points = [p for e in run["edges"] for p in (e["a"], e["b"])]
+        ts = [p[0] * tx + p[1] * tz for p in points]
+        span = max(ts) - min(ts)
+        if span < min_len:
+            continue
+        off = base["off"]
+        parts = [e["i"] for e in run["edges"]]
+        group_i = None
+        if grouped:
+            candidates = [g for g in grouped if set(parts) & set(g.get("parts", []))]
+            if candidates:
+                group_i = max(candidates, key=lambda g: len(set(parts) & set(g.get("parts", []))))["i"]
+        project = lambda t: [round(t * tx + off * nx, 4), round(t * tz + off * nz, 4)]
+        out.append({"p0": project(min(ts)), "p1": project(max(ts)), "length_m": round(span, 3),
+                    "normal": [round(nx, 6), round(nz, 6)],
+                    "azimuth_deg": round(math.degrees(math.atan2(nx, nz)), 3),
+                    "parts": parts, "group_i": group_i, "depth_m": 0.0,
+                    "plane_error_m": round(max(abs(p[0] * nx + p[1] * nz - off) for p in points), 4)})
+    out.sort(key=lambda w: (w["azimuth_deg"], w["p0"]))
+    for i, wall in enumerate(out):
+        wall["i"] = i
+    return out
+
+
 def apply_mat(M, p):
     """three.js 열 우선 4x4 행렬 M(16개) x 점 p(3) -> (x,y,z,w)"""
     x, y, z = p
@@ -677,6 +736,20 @@ def cmd_overview(args):
         overview(pg, out, args.angles, d)
 
 
+def capture_config(args):
+    keys = ("fit_wall", "wall_frac", "min_wall", "wall_group_deg", "wall_depth_gap", "width",
+            "overlap", "extra", "angles", "quality")
+    return {key: getattr(args, key) for key in keys}
+
+
+def completed_capture(path, config):
+    try:
+        meta = json.loads(path.read_text(encoding="utf-8"))
+        return bool(meta.get("complete") and meta.get("capture_config") == config)
+    except (OSError, ValueError):
+        return False
+
+
 def run_complex(pg, d, out, args, url=None):
     """한 단지: 고화질 -> 동마다 포커스·8방향 캡쳐. 단지 데이터도 저장."""
     out.mkdir(parents=True, exist_ok=True)
@@ -698,7 +771,20 @@ def run_complex(pg, d, out, args, url=None):
             log(f"[overview] ERROR {type(ex).__name__}: {str(ex).splitlines()[0][:200]}")
             pg.evaluate("() => document.querySelectorAll('style').forEach(s => { if (s.textContent.startsWith('body *{visibility:hidden')) s.remove(); })")
     done, failed = [], []
+    config = capture_config(args)
     for q in pois:
+        meta_path = out / f"{safe_name(q['name'])}_meta.json"
+        if not args.overwrite and completed_capture(meta_path, config):
+            log(f"[{q['name']}] SKIP unchanged completed capture")
+            done.append(q["name"])
+            continue
+        if meta_path.exists():
+            try:
+                previous = json.loads(meta_path.read_text(encoding="utf-8"))
+                previous["complete"] = False
+                meta_path.write_text(json.dumps(previous, ensure_ascii=False, indent=1), encoding="utf-8")
+            except (OSError, ValueError):
+                pass
         try:
             if capture_dong(pg, d, q, out, args):
                 done.append(q["name"])
@@ -740,7 +826,7 @@ def capture_dong(pg, d, q, out, args):
             "width_frac": round(w, 3), "canvas_css": box, "dpr": dpr,
             # 타깃(건물 중심) 거리 평면에서의 축척. 앞 벽은 더 가까워 이보다 조금 크다
             "px_per_m_at_target": round(vh * dpr / (2 * dist * 100 * math.tan(math.radians(st["fov"]) / 2)), 3),
-            "shots": []}
+            "capture_config": capture_config(args), "complete": False, "shots": []}
     # 평면·벽 정보(m). make_refs 가 이것과 사진마다의 카메라 행렬로 벽 꼭짓점을 사진 픽셀로 투영한다
     xz = footprint_xz(q)
     walls = walls_of(xz, args.min_wall, args.wall_group_deg, args.wall_depth_gap) if xz else []
@@ -820,6 +906,7 @@ def capture_dong(pg, d, q, out, args):
                 n = n1
         pg.evaluate("(a) => window.__cc.rotateAzimuthTo(a, false)", az0)  # 처음 각도로
         time.sleep(0.5)
+        meta["complete"] = True
     finally:
         pg.evaluate("() => document.querySelectorAll('style').forEach(s => { if (s.textContent.startsWith('body *{visibility:hidden')) s.remove(); })")
         pg.evaluate(JS_LABELS, False)
@@ -851,9 +938,15 @@ def cmd_batch(args):
             cid = re.search(r"complexes/(\d+)", url)
             cid = cid.group(1) if cid else safe_name(url)
             out = root / cid
-            if (out / "DONE").exists():
-                log(f"[skip] {cid} 이미 완료")
-                continue
+            done_path = out / "DONE"
+            if done_path.exists():
+                try:
+                    previous = json.loads(done_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    previous = {}
+                if not previous.get("fail"):
+                    log(f"[skip] {cid} 이미 완료")
+                    continue
             try:
                 ok, xurl = open_tour(pg, url)
                 if not ok:
@@ -862,7 +955,10 @@ def cmd_batch(args):
                     continue
                 d = load_xrx(pg, xurl)
                 done, failed = run_complex(pg, d, out, args, url)
-                (out / "DONE").write_text(json.dumps({"ok": done, "fail": failed}, ensure_ascii=False), encoding="utf-8")
+                if failed:
+                    done_path.unlink(missing_ok=True)
+                else:
+                    done_path.write_text(json.dumps({"ok": done, "fail": []}, ensure_ascii=False), encoding="utf-8")
                 summary.append((cid, f"ok {len(done)} fail {failed}"))
             except Exception as ex:
                 log(f"[{cid}] ERROR {type(ex).__name__}: {str(ex).splitlines()[0][:200]}")
@@ -976,24 +1072,26 @@ def _side_of(n, nf, r):
 
 
 def make_refs_one(meta, d, args):
-    walls, shots = meta.get("walls") or [], meta.get("shots") or []
+    groups, shots = meta.get("walls") or [], meta.get("shots") or []
     xz = meta.get("footprint_m") or []
-    if not walls or not shots:
-        log(f"[{meta['dong']}] 벽 또는 사진 정보가 없음 - 건너뜀 (캡쳐를 새 버전으로 다시 찍어야 함)")
+    if not groups or not shots:
+        log(f"[{meta['dong']}] missing walls or shots - recapture with the current version")
         return None
     if not all("view" in s["cam"] for s in shots):
-        log(f"[{meta['dong']}] 카메라 행렬이 메타에 없음(옛 버전 캡쳐) - 다시 찍어야 함")
+        log(f"[{meta['dong']}] missing camera matrices - recapture with the current version")
         return None
+    walls = reference_walls_of(xz, groups, min_len=args.ref_min_wall,
+                               angle_tol=args.ref_plane_deg, offset_tol=args.ref_plane_gap)
     box, dpr = meta["canvas_css"], meta["dpr"]
     g, roof = meta["ground_m"], meta["roof_m"]
-    nf, r = _side_frame(xz, walls)
+    nf, r = _side_frame(xz, groups)
     facades, dbg = [], []
     for w in walls:
         side = _side_of(w["normal"], nf, r)
         cand = []
         for si, s in enumerate(shots):
-            if "wall" in s and s["wall"] != w["i"]:
-                continue                                              # --fit-wall 로 찍은 사진은 자기 벽만
+            if "wall" in s and w["group_i"] is not None and s["wall"] != w["group_i"]:
+                continue
             cf = _facing_cos(s, w)
             if cf < args.min_cos:
                 continue
@@ -1007,7 +1105,7 @@ def make_refs_one(meta, d, args):
                 b = project_px(s, [w["p1"][0], y, w["p1"][1]], box, dpr, s["img"])
                 good = bool(a and b and all(mx <= t[0] <= W_ - mx and my <= t[1] <= H_ - my for t in (a, b)))
                 ok.append(good)
-            best, run0 = (0, 0), None                                 # 가장 긴 연속 구간
+            best, run0 = (0, 0), None
             for k, good in enumerate(ok + [False]):
                 if good and run0 is None:
                     run0 = k
@@ -1017,12 +1115,12 @@ def make_refs_one(meta, d, args):
                     run0 = None
             y0 = g + (roof - g) * best[0] / N
             y1 = g + (roof - g) * best[1] / N
+            coverage = min(1.0, (y1 - y0) / (roof - g))
             if y1 - y0 < args.min_h:
                 continue
             P = lambda x_, z_, y_: project_px(s, [x_, y_, z_], box, dpr, s["img"])
             pa0, pa1 = P(*w["p0"], y1), P(*w["p0"], y0)
             pb0, pb1 = P(*w["p1"], y1), P(*w["p1"], y0)
-            # 사진에서 왼쪽에 보이는 끝점을 기준으로 TL,TR,BR,BL
             left_is_p0 = pa0[0] < pb0[0]
             TL, BL = (pa0, pa1) if left_is_p0 else (pb0, pb1)
             TR, BR = (pb0, pb1) if left_is_p0 else (pa0, pa1)
@@ -1030,16 +1128,25 @@ def make_refs_one(meta, d, args):
             if wpx < args.min_px:
                 continue
             ppm = wpx / w["length_m"]
-            cand.append((cf * min(1.0, (y1 - y0) / (roof - g)) * ppm, si, s, y0, y1, [TL, TR, BR, BL], ppm, cf))
+            score = cf ** 4 * coverage * math.sqrt(ppm)
+            cand.append((score, si, s, y0, y1, [TL, TR, BR, BL], ppm, cf, coverage))
         cand.sort(key=lambda c: -c[0])
-        for _, si, s, y0, y1, cs, ppm, cf in cand[: args.per_wall or None]:
-            name = f"{meta['dong']}_w{w['i']}_{si + 1}"
+        for _, si, s, y0, y1, cs, ppm, cf, coverage in cand[: args.per_wall or None]:
+            name = f"{meta['dong']}_p{w['i']}_{si + 1}"
+            confidence = "high" if cf >= 0.95 else "medium" if cf >= 0.90 else "low"
             facades.append({
                 "file": args.prefix + s["file"], "side": side, "name": name,
                 "corners": [[round(p[0], 1), round(p[1], 1)] for p in cs],
                 "size_m": [round(w["length_m"], 2), round(y1 - y0, 2)],
                 "x_m": [0.0, round(w["length_m"], 2)], "z_m": [round(y0 - g, 2), round(y1 - g, 2)],
-                "_info": f"wall {w['i']} px/m {ppm:.1f} face_cos {cf:.2f} (computed from camera, not read from the photo)"})
+                "normal_deg": w["azimuth_deg"], "source_wall_i": w["group_i"], "source_plane_i": w["i"],
+                "camera_az_deg": s.get("az_deg_actual"), "face_cos": round(cf, 4),
+                "visible_fraction": round(coverage, 3), "plane_error_m": w["plane_error_m"],
+                "confidence": confidence,
+                "paint": {"use_for_color": bool(cf >= 0.95),
+                          "reason": "frontal planar view" if cf >= 0.95 else "oblique view: geometry reference only"},
+                "paint_exclude": [],
+                "_info": f"plane {w['i']} group {w['group_i']} px/m {ppm:.1f} face_cos {cf:.2f}; camera-projected planar homography"})
             dbg.append((s["file"], name, cs))
     # 평면도(위성 대용): 외곽선을 정면이 아래로 오게 그린 이미지
     sat = None
@@ -1061,7 +1168,10 @@ def make_refs_one(meta, d, args):
         c = [toimg(min(us), max(vs)), toimg(max(us), max(vs)), toimg(max(us), min(vs)), toimg(min(us), min(vs))]
         sat = {"file": args.prefix + pf.name, "corners": [[round(a, 1), round(b, 1)] for a, b in c], "m_per_px": mpp,
                "_note": "plan drawn from the footprint (not a real satellite photo); front = the long wall facing scene +z (ASSUMED, street side unknown)"}
-    out = {"_help": f"made by naver_vr.py make_refs from camera matrices; dong {meta['dong']}. sides are a guess: check/rename them", "facades": facades}
+    out = {"_schema": "naver-vr-planar-v2",
+           "_help": f"made by naver_vr.py make_refs from camera matrices; dong {meta['dong']}. sides are a guess: check/rename them",
+           "_paint": "paint_exclude uses normalized whole-entry wall coordinates: u=[left,right], v=[bottom,top]. Unknown cells stay unpainted.",
+           "facades": facades}
     if sat:
         out["satellite"] = sat
     if args.debug:
@@ -1075,8 +1185,8 @@ def make_refs_one(meta, d, args):
             for k, p in enumerate(cs):
                 dr.text((p[0] + 6, p[1] + 6), "TL TR BR BL".split()[k], fill=(255, 255, 0))
             im.save(dd / f"{nm}.png")
-    log(f"[{meta['dong']}] walls {len(walls)} -> facades {len(facades)}"
-        + "".join(f"  w{w['i']}:{sum(1 for f in facades if f['name'].startswith(meta['dong'] + '_w' + str(w['i']) + '_'))}" for w in walls))
+    log(f"[{meta['dong']}] planar refs {len(walls)} -> facades {len(facades)}"
+        + "".join(f"  p{w['i']}:{sum(1 for f in facades if f.get('source_plane_i') == w['i'])}" for w in walls))
     return out
 
 
@@ -1087,6 +1197,8 @@ def cmd_make_refs(args):
     n = 0
     for mf in metas:
         meta = json.loads(mf.read_text(encoding="utf-8"))
+        if "dong" not in meta:
+            continue
         if want and meta["dong"] not in want:
             continue
         res = make_refs_one(meta, d, args)
@@ -1109,6 +1221,7 @@ def main():
     b.add_argument("urls", nargs="*")
     b.add_argument("--file", help="URL 목록 파일(한 줄에 하나)")
     for x in (r, b):
+        x.add_argument("--overwrite", action="store_true", help="같은 설정으로 완료한 동도 다시 캡처")
         x.add_argument("--fit-wall", action="store_true", help="벽마다 정면으로 찍는다(8방향 대신). 외곽선 데이터가 있어야 함")
         x.add_argument("--wall-frac", type=float, default=None,
                        help="--fit-wall: 면 폭 / 화면 폭으로 더 가까이 (기본: 안 씀 = --width 기준. 0.8 이면 해상도는 높지만 사진 수가 몇 배)")
@@ -1139,7 +1252,10 @@ def main():
     m.add_argument("--margin", type=float, default=0.02, help="화면 가장자리에서 이만큼 안쪽만 인정")
     m.add_argument("--min-h", type=float, default=6.0, help="한 사진에서 보이는 벽 높이(m) 하한")
     m.add_argument("--min-px", type=float, default=300, help="사진에서 벽 폭(px) 하한")
-    m.add_argument("--per-wall", type=int, default=0, help="벽마다 가장 좋은 사진 N 장만 (0 = 전부)")
+    m.add_argument("--per-wall", type=int, default=1, help="best N images per exact plane by frontality, coverage and resolution (0 = all)")
+    m.add_argument("--ref-min-wall", type=float, default=1.0, help="refs 로 만들 실제 평면의 최소 폭(m)")
+    m.add_argument("--ref-plane-deg", type=float, default=2.0, help="연속 변을 같은 평면으로 보는 최대 각도 차이")
+    m.add_argument("--ref-plane-gap", type=float, default=0.05, help="연속 변을 같은 평면으로 보는 최대 깊이 오차(m)")
     m.add_argument("--plan-mpp", type=float, default=0.25)
     m.add_argument("--debug", action="store_true", help="refs_check/ 에 꼭짓점을 그린 사진 저장")
     a = ap.parse_args()
