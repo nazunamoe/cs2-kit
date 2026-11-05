@@ -1,8 +1,8 @@
-# CS2 building kit installation — Codex / Kimi Code
+# CS2 building kit installation — DeepSeek via Codex
 
 ## Included
 
-- `AGENTS.md`: short Codex/Kimi working rules
+- `AGENTS.md`: short DeepSeek working rules and reasoning routing
 - `TOOLS.md`, `docs/agent/`: on-demand tool and modeling references
 - `cs2kit.py` and example generators
 - `tools/agent.py`: portable JSON workflow
@@ -26,10 +26,11 @@
 
    ```bash
    python tools/project.py new my-apt
-   # or: python tools/project.py new my-apt --template cw
+   # curtain wall: python tools/project.py new my-apt --template cw
+   # mixed-use/school/irregular: python tools/project.py new my-building --template generic
    ```
 
-7. Start Codex or Kimi Code at the kit root. The first machine check is:
+7. Configure `deepseek-flash` using `docs/agent/DEEPSEEK.md`, then start Codex at the kit root. Never store the API key in project files. The first machine check is:
 
    ```bash
    python tools/agent.py doctor --project my-apt --json

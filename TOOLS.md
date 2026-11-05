@@ -1,4 +1,4 @@
-# Tool reference — Codex / Kimi Code
+# Tool reference — DeepSeek via Codex
 
 Run commands from the kit root. `agent.py` requires `--project`; lower-level tools also accept `--project` or an explicit path inside a project. Read `docs/agent/WORKFLOW.md` for the build loop.
 
@@ -7,6 +7,9 @@ Run commands from the kit root. `agent.py` requires `--project`; lower-level too
 ```bash
 python tools/agent.py doctor --project P --json
 python tools/agent.py resume --project P --json
+python tools/agent.py deepseek-policy --project P --task data|edit|geometry|vision|review --json
+python tools/agent.py vision --project P --photo photos/front.jpg --box=x0,y0,x1,y1 --wall-id W --json
+python tools/agent.py require-final --project P --json
 python tools/agent.py cycle --project P --generator G --mode quick|visual|final --label STEP --brief --json
 python tools/agent.py review --project P --status PASS|FAIL|NEEDS_HUMAN_REVIEW --note NOTE --artifact PATH --json
 python tools/agent.py photos --project P --page 0 --page-size 16 --json
@@ -123,6 +126,7 @@ V1 limitations: piloti depth is simplified; facade_read/band_scan need real-phot
 
 ## Photo evidence and generic volumes
 
+- `docs/agent/DEEPSEEK.md`: model choice, reasoning policy, crop/privacy, Codex setup, and final assertion.
 - `docs/agent/PHOTO_ONLY.md`: wall-linked photo evidence, normalized U/V observations, confidence, wall-specific refs.
 - `docs/agent/VOLUMES.md`: `--template generic`, arbitrary polygon volumes, wall features, volume LODs, and manifest wall metadata.
 - `tools/evidence.py`: photo/feature/validate ledger commands; normally called through `agent.py evidence`.

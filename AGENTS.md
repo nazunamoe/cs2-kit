@@ -1,4 +1,4 @@
-# CS2 building agent — Codex / Kimi Code
+# CS2 building agent — DeepSeek via Codex
 
 Create one `<Name>_cs2.py` and `building_spec_<Name>.yaml` from the active project's `TASK.md`. Report in Korean. Target Blender 5.2; the kit handles Blender API differences.
 
@@ -37,11 +37,11 @@ python tools/agent.py cycle --project <project> --generator <name>_cs2.py --mode
 - `visual`: OBJ + preview + photo checks when refs exist.
 - `final`: FBX + full photo/tile/LOD checks + strict gate.
 
-Follow the compact JSON `next_action`; do not dump full logs. `NOT_CHECKED` is unverified, `NOT_APPLICABLE` means no photo refs. After visual/final, inspect every artifact listed in `next_action` and run that exact review command. `PARTIAL` is not PASS; without image input use `NEEDS_HUMAN_REVIEW`.
+Follow the compact JSON `next_action`; do not dump full logs. Use `agent.py deepseek-policy --task data|edit|geometry|vision|review` to select the current reasoning policy. `NOT_CHECKED` is unverified, `NOT_APPLICABLE` means no photo refs. After visual/final, inspect every artifact listed in `next_action` and run that exact review command. `PARTIAL` is not PASS; without image input use `NEEDS_HUMAN_REVIEW`. Before final completion run `agent.py require-final`.
 
 ## Photos
 
-Use `agent.py photos` contact-sheet pages before opening individual images. Record observations with `agent.py observe`; unchanged observed photos need not be read again. Crop only ambiguous regions. If image input is unavailable, say so and use supplied `photo_refs.json`; never invent visual findings.
+Use `agent.py photos` contact-sheet pages for classification only. Record observations with `agent.py observe`; unchanged observed photos need not be read again. Use `agent.py vision` for a wall/detail crop and explicit redaction. The kit never uploads photos automatically. If image input is unavailable, use supplied `photo_refs.json`; never invent visual findings.
 
 Build order: mass -> windows -> facade parts -> roof -> LOD -> textures -> YAML -> final. Fix mass ratio and floor pitch before detail. A repeated mismatch gets at most three attempts; then record its evidence and reason under `photo_mismatch_notes`.
 
@@ -69,6 +69,7 @@ Use `WindowSet.add_face` for windows. Use atlas UV helpers for custom quads. `ax
 ## On-demand references
 
 - Full workflow, resume, review, fix: `docs/agent/WORKFLOW.md`
+- DeepSeek model, reasoning, privacy, Codex setup: `docs/agent/DEEPSEEK.md`
 - Tool commands and preset API: `TOOLS.md`
 - Detailed facade/photo modeling: `docs/agent/MODELING.md`
 - Existing facade lessons: `docs/FACADE_KNOWHOW.md`

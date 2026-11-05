@@ -240,6 +240,50 @@ def normalized_cycle(args):
         emit(result, args.json, 0 if status == "PASS" else 1 if status == "FAIL" else 2)
 
 
+def deepseek_policy(args):
+    require_project()
+    cmd = [PY, os.path.join(KIT, "tools", "deepseek.py"), "--task", args.task]
+    if args.check_credentials:
+        cmd.append("--check-credentials")
+    code, log = run(cmd)
+    result = json.loads(log.strip().splitlines()[-1])
+    result["next_action"] = {"command": None, "reason": "apply this policy to the current task"}
+    emit(result, args.json, code)
+
+
+def vision(args):
+    require_project()
+    cmd = [PY, os.path.join(KIT, "tools", "vision_prepare.py"), args.photo]
+    for name, value in (("--box", args.box), ("--wall-id", args.wall_id), ("--out", args.out)):
+        if value:
+            cmd += [name, value]
+    if args.max_side != 1300:
+        cmd += ["--max-side", str(args.max_side)]
+    for region in args.redact:
+        cmd += ["--redact", region]
+    code, log = run(cmd)
+    result = json.loads(log.strip().splitlines()[-1])
+    result["next_action"] = {"command": None, "reason": "inspect the derived crop before any explicit external upload"}
+    emit(result, args.json, code)
+
+
+def require_final(args):
+    require_project()
+    state = read_json(STATE, None)
+    if not state:
+        emit({"status": "NOT_CHECKED", "next_action": {"command": f"python tools/agent.py doctor --project {NAME} --json",
+                                                       "reason": "no saved final gate"}}, args.json, 2)
+    gate = state.get("last_gate") or {}
+    complete = (gate.get("mode") == "final" and gate.get("status") == "PASS"
+                and state.get("visual_review") == "PASS"
+                and (gate.get("checks") or {}).get("fbx") == "PASS")
+    status = "PASS" if complete else "FAIL" if gate.get("status") == "FAIL" else "INCOMPLETE"
+    emit({"status": status, "mode": gate.get("mode"), "visual_review": state.get("visual_review"),
+          "checks": gate.get("checks", {}),
+          "next_action": None if complete else state.get("next_action")}, args.json,
+         0 if complete else 1 if status == "FAIL" else 2)
+
+
 def doctor(args):
     require_project()
     import importlib.util
@@ -498,10 +542,24 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, epilog="All commands require --project <name>. Add --json for one machine-readable result.")
     ap.add_argument("--json", action="store_true")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("doctor", "resume"):
+    for name in ("doctor", "resume", "require-final"):
         p = sub.add_parser(name)
         p.add_argument("--json", action="store_true")
-        p.set_defaults(fn=globals()[name])
+        p.set_defaults(fn=globals()[name.replace("-", "_")])
+    p = sub.add_parser("deepseek-policy")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--task", choices=("data", "edit", "geometry", "vision", "review"), required=True)
+    p.add_argument("--check-credentials", action="store_true")
+    p.set_defaults(fn=deepseek_policy)
+    p = sub.add_parser("vision")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--photo", required=True)
+    p.add_argument("--box", default="")
+    p.add_argument("--redact", action="append", default=[])
+    p.add_argument("--wall-id", default="")
+    p.add_argument("--max-side", type=int, default=1300)
+    p.add_argument("--out", default="")
+    p.set_defaults(fn=vision)
     p = sub.add_parser("photos")
     p.add_argument("--json", action="store_true")
     p.add_argument("--page", type=int, default=0)
