@@ -1419,8 +1419,13 @@ class WindowSet:
     def add_pts(self, pts, pts_lod2, ww, hh, floor, unit):
         self.items.append(dict(pts=pts, pts2=pts_lod2, ww=ww, hh=hh, floor=floor, unit=unit))
 
-    def build(self, grid=REF_GRID):
-        """UV 배정 후 (main/LOD1 용, LOD2 용) MeshBuilder 반환."""
+    def build(self, grid=REF_GRID, atlas=None):
+        """UV 배정 후 (main/LOD1 용, LOD2 용) MeshBuilder 반환.
+
+        atlas is given: the 0..1 reference grid is mapped into the atlas
+        "window" cell, so the win mesh samples the window texture instead of
+        every atlas cell (which showed wall/stone control colours at night).
+        """
         cells = grid * grid
         units = max([w["unit"] for w in self.items] + [0]) + 1
         stride = 7 if math.gcd(7, cells) == 1 else 11
@@ -1439,10 +1444,18 @@ class WindowSet:
                 v0 = cy * cs + (j // n) * slot + pad
                 k = inner / max(w["ww"], w["hh"])
                 w["uv"] = [(u0, v0), (u0 + w["ww"] * k, v0), (u0 + w["ww"] * k, v0 + w["hh"] * k), (u0, v0 + w["hh"] * k)]
+        wr = None
+        if atlas is not None and "window" in getattr(atlas, "cells", {}):
+            wr = atlas._uvrect("window")
         a, b = MeshBuilder(), MeshBuilder()
         for w in self.items:
-            a.quad(w["pts"], w["uv"], "window")
-            b.quad(w["pts2"], w["uv"], "window")
+            uv = w["uv"]
+            if wr:
+                u0, v0, u1, v1 = wr
+                du, dv = u1 - u0, v1 - v0
+                uv = [(u0 + u * du, v0 + v * dv) for u, v in uv]
+            a.quad(w["pts"], uv, "window")
+            b.quad(w["pts2"], uv, "window")
         return a, b
 
 
@@ -1474,7 +1487,8 @@ def export_asset(name_base, level, meshes, atlas, out_root, lod2_tex=1024, lot=N
     """meshes: {"main","lod1","lod2", 선택: "gls","lod1_gls"} MeshBuilder + "windows": WindowSet.
     피벗을 바닥 중앙으로 옮기고, 이름(로트 포함)을 정한 뒤, 텍스처·OBJ(또는 FBX)·manifest.json 을 씀. 반환: (폴더, 요약 dict)"""
     lod2_tex = min(lod2_tex, atlas.size)
-    win_main, win_lod2 = meshes["windows"].build() if meshes.get("windows") else (MeshBuilder(), MeshBuilder())
+    win_main, win_lod2 = (meshes["windows"].build(atlas=atlas) if meshes.get("windows")
+                          else (MeshBuilder(), MeshBuilder()))
     parts = {k: meshes.get(k) or MeshBuilder() for k in ("main", "lod1", "lod2", "gls", "lod1_gls")}
     parts.update(win=win_main, lod1_win=_copy(win_main), lod2_win=win_lod2)
     M = parts["main"]
