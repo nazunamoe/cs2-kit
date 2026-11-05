@@ -240,19 +240,48 @@ def normalized_cycle(args):
         emit(result, args.json, 0 if status == "PASS" else 1 if status == "FAIL" else 2)
 
 
+def glb_mass(args):
+    require_project()
+    glb_args = args.glb_args[1:] if args.glb_args[:1] == ["--"] else args.glb_args
+    if not any(value.lower().endswith((".glb", ".gltf")) for value in glb_args):
+        photos_dir = os.path.join(ROOT, "photos")
+        found = []
+        for base, _, names in os.walk(photos_dir):
+            found.extend(os.path.join(base, name) for name in sorted(names) if name.lower().endswith((".glb", ".gltf")))
+        if len(found) != 1:
+            raise SystemExit("pass one GLB path after --, or keep exactly one GLB/GLTF in photos/")
+        glb_args = [found[0]] + glb_args
+    code, log = run([PY, os.path.join(KIT, "tools", "glb_shape.py")] + glb_args)
+    try:
+        result = json.loads(log.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        result = {"status": "FAIL", "errors": [log.strip() or "GLB mass reconstruction failed"]}
+    result.setdefault("next_action", {"command": None, "reason": "inspect the reconstructed mass before facade work"})
+    emit(result, args.json, code)
+
+
 def doctor(args):
     require_project()
     import importlib.util
     from run_blender import find_blender
     generators = sorted(f for f in os.listdir(ROOT) if f.endswith("_cs2.py"))
+    scans = []
+    for base, _, names in os.walk(os.path.join(ROOT, "photos")):
+        scans.extend(os.path.relpath(os.path.join(base, f), ROOT).replace(os.sep, "/")
+                     for f in sorted(names) if f.lower().endswith((".glb", ".gltf")))
     state = read_json(STATE)
+    next_action = state.get("next_action") or {"command": None, "reason": "select a generator explicitly"}
+    if scans and not state:
+        next_action = {"command": f"python tools/agent.py glb-mass --project {NAME} --json -- {scans[0]} --list",
+                       "reason": "GLB found: select building meshes and reconstruct simplified mass volumes before hand-drawing the mass"}
     result = {
         "status": "OK", "project": NAME, "project_root": ROOT,
-        "generators": generators, "dependencies": {n: importlib.util.find_spec(n) is not None for n in ("numpy", "PIL")},
+        "generators": generators, "glb_files": scans,
+        "dependencies": {n: importlib.util.find_spec(n) is not None for n in ("numpy", "PIL")},
         "blender": find_blender(verbose=False), "photo_refs": os.path.isfile(os.path.join(ROOT, "photo_refs.json")),
         "state": os.path.relpath(STATE, ROOT) if state else None,
         "current_stage": state.get("current_stage"), "visual_review": state.get("visual_review", "NOT_CHECKED"),
-        "next_action": state.get("next_action") or {"command": None, "reason": "select a generator explicitly"},
+        "next_action": next_action,
     }
     emit(result, args.json)
 
@@ -502,6 +531,10 @@ def main():
         p = sub.add_parser(name)
         p.add_argument("--json", action="store_true")
         p.set_defaults(fn=globals()[name])
+    p = sub.add_parser("glb-mass")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("glb_args", nargs=argparse.REMAINDER)
+    p.set_defaults(fn=glb_mass)
     p = sub.add_parser("photos")
     p.add_argument("--json", action="store_true")
     p.add_argument("--page", type=int, default=0)
