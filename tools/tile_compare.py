@@ -122,6 +122,17 @@ def zones(arr, ppm, axis, min_len_m, jump=9.0):
     return out
 
 
+def colour_sample(pa, ma, pe, box):
+    x0, y0, x1, y1 = box
+    ps = pa[y0:y1, x0:x1].reshape(-1, 3)
+    ms = ma[y0:y1, x0:x1].reshape(-1, 3)
+    pm = np.median(ps, 0)
+    mm = np.median(ms, 0)
+    vegetation = ((ps[:, 1] > ps[:, 0] * 1.08) & (ps[:, 1] > ps[:, 2] * 1.08)).mean()
+    mixed = float(np.std(ps)) > 55.0 or vegetation > 0.20 or pe[y0:y1, x0:x1].mean() > 0.35
+    return pm, mm, not mixed
+
+
 def run_wall(name, photo, model, ppm, tile_m, top, outdir, wall_w_m, wall_h_m):
     gp, gm = gray(photo), gray(model)
     pe, me = edges(gp, 85), edges(gm, 85)
@@ -186,14 +197,16 @@ def run_wall(name, photo, model, ppm, tile_m, top, outdir, wall_w_m, wall_h_m):
 
     # ---- colour (paint) comparison: per-tile median colour, photo vs model, after matching overall exposure/white balance
     pa, ma = np.asarray(photo, np.float32), np.asarray(model, np.float32)
-    # overall exposure/white balance = median of the per-tile ratios (robust: a repainted part cannot drag it away)
-    ratios = [np.median(ma[y0:y1, x0:x1].reshape(-1, 3), 0) / np.maximum(np.median(pa[y0:y1, x0:x1].reshape(-1, 3), 0), 1.0)
-              for _, _, _, _, (x0, y0, x1, y1) in res]
-    gain = np.median(np.array(ratios), 0)
+    samples = []
+    for r, c, rec, pre, box in res:
+        pm, mm, trusted = colour_sample(pa, ma, pe, box)
+        if trusted:
+            samples.append((r, c, box, pm, mm))
+    mixed_count = len(res) - len(samples)
+    ratios = [mm / np.maximum(pm, 1.0) for _, _, _, pm, mm in samples]
+    gain = np.median(np.array(ratios), 0) if ratios else np.ones(3)
     cres = []
-    for r, c, rec, pre, (x0, y0, x1, y1) in res:
-        pm = np.median(pa[y0:y1, x0:x1].reshape(-1, 3), 0)
-        mm = np.median(ma[y0:y1, x0:x1].reshape(-1, 3), 0)
+    for r, c, (x0, y0, x1, y1), pm, mm in samples:
         de = float(np.linalg.norm(to_lab(np.clip(pm * gain, 0, 255)) - to_lab(mm)))
         cres.append((de, r, c, pm * gain, mm, (x0, y0, x1, y1)))
     cres.sort(key=lambda q: -q[0])
@@ -201,8 +214,9 @@ def run_wall(name, photo, model, ppm, tile_m, top, outdir, wall_w_m, wall_h_m):
     for de, r, c, pm, mm, (x0, y0, x1, y1) in cres[:min(top, 4)]:
         if de > COLOR_OFF * 0.6:
             tag = "  COLOR_OFF" if de > COLOR_OFF else ""
-            out.append(f"COLOR {name} r{r}c{c} x[{x0 / ppm:.0f},{x1 / ppm:.0f}]m photo {hexc(pm)} model {hexc(mm)} dE {de:.0f}{tag}")
-    out.append(f"DETAIL_COLOR {name} tiles_off {off}/{len(cres)} (dE>{COLOR_OFF:.0f} after matching overall exposure)")
+            out.append(f"COLOR {name} r{r}c{c} x[{x0 / ppm:.0f},{x1 / ppm:.0f}]m photo {hexc(pm)} model {hexc(mm)} dE {de:.0f}{tag} confidence=trusted")
+    out.append(f"DETAIL_COLOR {name} tiles_off {off}/{len(cres)} (dE>{COLOR_OFF:.0f}; trusted tiles only)")
+    out.append(f"INFO     {name} colour trusted {len(samples)}/{len(res)} mixed_or_occluded {mixed_count}")
     if name != "satellite":
         for lab_, ax, ml in (("rows z", "z", 1.2), ("cols x", "x", 2.0)):
             zp, zm_ = zones(pa, ppm, ax, ml), zones(ma, ppm, ax, ml)

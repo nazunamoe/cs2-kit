@@ -23,7 +23,7 @@ except Exception:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 from proj import ROOT, KIT, NAME  # noqa: E402,F401
-from check import agent_summary  # noqa: E402
+from agent_actions import agent_summary  # noqa: E402
 
 
 def run(cmd):
@@ -129,6 +129,19 @@ def main():
             ex = "; ".join(str(x) for x in e["examples"][:a.list])
             print(f"   {tag} {e['msg']}" + (f"  e.g. {ex}" if ex else ""))
 
+    lod = dict(checked=False, status="NOT_CHECKED", line=None, notes=[])
+    lod_future = None
+    lod_executor = None
+    if a.full:
+        lscript = os.path.join(KIT, "tools", "qa", "lod_check.py")
+        if not os.path.exists(lscript):
+            lod["notes"].append("tools/qa/lod_check.py not found")
+            print("[lod] NOT_CHECKED - tools/qa/lod_check.py not found")
+        else:
+            import concurrent.futures as cf
+            lod_executor = cf.ThreadPoolExecutor(max_workers=1)
+            lod_future = lod_executor.submit(run, [py, lscript, os.path.join(out, asset), "--res", "512"])
+
     # 3) preview
     prev = None
     ok = not r["errors"]
@@ -149,63 +162,73 @@ def main():
     mism = None
     photo_lines = []
     photo_status = "NOT_APPLICABLE" if not refs_exist else "NOT_CHECKED"
-    if not a.no_render and refs_exist:
-        photo_code, log = run([py, os.path.join(HERE, "photo_check.py"), os.path.join(out, asset)])
-        mism = sum(1 for l in log.splitlines() if l.strip().startswith("MISMATCH"))
-        photo_status = "FAIL" if photo_code == 2 or mism else "PASS"
-        print(f"[photo] status={photo_status} mismatch={mism} - sheets in previews/photo_check/")
-        for l in log.splitlines():
-            if l.strip().startswith(("MISMATCH", "MATCH", "INFO")):
-                s = l.strip().replace("MISMATCH", "PHOTO_MISMATCH", 1)
-                photo_lines.append(s)
-                print("   " + s)
-
     tiles = dict(checked=False, status="NOT_APPLICABLE" if not refs_exist else "NOT_CHECKED",
                  simplified=[], detail=[], detail_color=[], color_off=[], tiles_off=0, tiles_total=0)
-    if (a.tiles or a.full) and not a.no_render and refs_exist:
-        tile_code, log = run([py, os.path.join(HERE, "tile_compare.py"), os.path.join(out, asset), "--top", "3"])
-        tiles["checked"] = True
-        tiles["status"] = "FAIL" if tile_code == 2 else "PASS"
-        print(f"[tiles] status={tiles['status']} - open only flagged images in previews/tiles/")
-        for l in log.splitlines():
-            s = l.strip()
-            if s.startswith(("TILE", "DETAIL", "COLOR", "ZONES", "INFO")):
+    if not a.no_render and refs_exist:
+        visual_cmd = [py, os.path.join(HERE, "visual_check.py"), os.path.join(out, asset)]
+        if a.tiles or a.full:
+            visual_cmd += ["--tiles", "--top", "3"]
+            tiles["checked"] = True
+        visual_code, log = run(visual_cmd)
+        section = ""
+        summary = ""
+        for raw in log.splitlines():
+            s = raw.strip()
+            if s.startswith("[photo]"):
+                section = "photo"
+                continue
+            if s.startswith("[tiles]"):
+                section = "tiles"
+                continue
+            if s.startswith("[visual]"):
+                summary = s
+                continue
+            if section == "photo" and s.startswith(("MISMATCH", "MATCH", "INFO")):
+                item = s.replace("MISMATCH", "PHOTO_MISMATCH", 1)
+                photo_lines.append(item)
+                print("   " + item)
+            elif section == "tiles" and s.startswith(("TILE", "DETAIL", "COLOR", "ZONES", "INFO")):
                 print("   " + s)
-            if "SIMPLIFIED" in s and s.startswith("TILE "):
-                tiles["simplified"].append(s)
-            elif s.startswith("DETAIL_COLOR "):
-                tiles["detail_color"].append(s)
-                m = re.search(r"tiles_off\s+(\d+)/(\d+)", s)
-                if m:
-                    tiles["tiles_off"] += int(m.group(1))
-                    tiles["tiles_total"] += int(m.group(2))
-            elif s.startswith("DETAIL "):
-                tiles["detail"].append(s)
-            elif "COLOR_OFF" in s:
-                tiles["color_off"].append(s)
+                if "SIMPLIFIED" in s and s.startswith("TILE "):
+                    tiles["simplified"].append(s)
+                elif s.startswith("DETAIL_COLOR "):
+                    tiles["detail_color"].append(s)
+                    m = re.search(r"tiles_off\s+(\d+)/(\d+)", s)
+                    if m:
+                        tiles["tiles_off"] += int(m.group(1))
+                        tiles["tiles_total"] += int(m.group(2))
+                elif s.startswith("DETAIL "):
+                    tiles["detail"].append(s)
+                elif "COLOR_OFF" in s:
+                    tiles["color_off"].append(s)
+        mism = sum(1 for l in log.splitlines() if l.strip().startswith("MISMATCH"))
+        pm = re.search(r"photo_status=(\w+)", summary)
+        tm = re.search(r"tile_status=(\w+)", summary)
+        photo_status = pm.group(1) if pm else "FAIL" if visual_code else "PASS"
+        if tm:
+            tiles["status"] = tm.group(1)
+        elif tiles["checked"]:
+            tiles["status"] = "FAIL"
+        print(f"[photo] status={photo_status} mismatch={mism}; [tiles] status={tiles['status']}")
 
-    lod = dict(checked=False, status="NOT_CHECKED", line=None, notes=[])
-    if a.full:
-        lscript = os.path.join(KIT, "tools", "qa", "lod_check.py")
-        if not os.path.exists(lscript):
-            lod["notes"].append("tools/qa/lod_check.py not found")
-            print("[lod] NOT_CHECKED - tools/qa/lod_check.py not found")
+    if lod_future is not None:
+        code, log = lod_future.result()
+        lines_l = [l.strip() for l in log.splitlines() if l.strip()]
+        line = next((l for l in reversed(lines_l) if l.startswith("LODCHECK")), None)
+        if line:
+            lod["checked"] = True
+            lod["line"] = line
+            lod["status"] = "PASS" if "LODCHECK PASS" in line else "FAIL"
+            print(f"[lod] {line}")
+            for l in lines_l:
+                if l.startswith(("HOLE", "NO_TEXTURE", "at gen")):
+                    print("   " + l)
         else:
-            code, log = run([py, lscript, os.path.join(out, asset), "--res", "512"])
-            lines_l = [l.strip() for l in log.splitlines() if l.strip()]
-            line = next((l for l in reversed(lines_l) if l.startswith("LODCHECK")), None)
-            if line:
-                lod["checked"] = True
-                lod["line"] = line
-                lod["status"] = "PASS" if "LODCHECK PASS" in line else "FAIL"
-                print(f"[lod] {line}")
-                for l in lines_l:
-                    if l.startswith(("HOLE", "NO_TEXTURE", "at gen")):
-                        print("   " + l)
-            else:
-                why = next((l for l in reversed(lines_l) if ".blend" in l or "Blender" in l), "")
-                lod["notes"].append(why or (lines_l[-1] if lines_l else "no output"))
-                print("[lod] NOT_CHECKED - needs FBX/.blend and Blender" + (f" ({why})" if why else ""))
+            why = next((l for l in reversed(lines_l) if ".blend" in l or "Blender" in l), "")
+            lod["notes"].append(why or (lines_l[-1] if lines_l else "no output"))
+            print("[lod] NOT_CHECKED - needs FBX/.blend and Blender" + (f" ({why})" if why else ""))
+    if lod_executor is not None:
+        lod_executor.shutdown()
 
     reasons = []
     incomplete = []

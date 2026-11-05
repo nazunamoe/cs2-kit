@@ -4,6 +4,7 @@
 검증 도구(tools/qa/). cycle.py 다음에, 보고 전에 매번 돌린다.
   python tools/qa/lod_check.py output/<asset>                # 활성 프로젝트 기준 경로
   python tools/qa/lod_check.py output/<asset> --az 16 --elev -10,5,25,50 --res 512
+  python tools/qa/lod_check.py --self-test                  # closed cube PASS + open-front cube FAIL baseline
 
 출력: previews/lod_check/<asset>/  (구멍이 보인 각도마다 그림: 회색 = 메인만, 흰색 = LOD 도 있음, 빨강 = 구멍)
 마지막 줄: LODCHECK PASS|FAIL lod1 max X% (az, el) lod2 max Y% ...   기준: 각 각도 구멍 0.05% 이하 = PASS
@@ -38,14 +39,62 @@ def active_project():
     return os.getcwd()
 
 
+def baseline_self_test():
+    proj = active_project()
+    work = os.path.join(proj, "work", "lod_baseline")
+    os.makedirs(work, exist_ok=True)
+    maker = os.path.join(work, "make_baseline.py")
+    source = r'''import bpy, bmesh, os, sys
+out = sys.argv[sys.argv.index("--") + 1]
+for name, missing in (("BaselineClosed", False), ("BaselineOpen", True)):
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.mesh.primitive_cube_add(size=2)
+    obj = bpy.context.active_object
+    obj.name = name
+    if missing:
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        faces = [f for f in bm.faces if f.normal.y < -0.5]
+        bmesh.ops.delete(bm, geom=faces, context="FACES_ONLY")
+        bm.to_mesh(obj.data)
+        bm.free()
+    bpy.ops.wm.save_as_mainfile(filepath=os.path.join(out, name + ".blend"))
+'''
+    with open(maker, "w", encoding="utf-8") as f:
+        f.write(source)
+    made = subprocess.run([blender_exe(), "-b", "--python-exit-code", "1", "-P", maker, "--", work],
+                          capture_output=True, text=True)
+    if made.returncode:
+        print(made.stdout[-2000:], made.stderr[-2000:])
+        print("LODBASELINE FAIL: could not create baseline assets")
+        sys.exit(1)
+    passed = True
+    for name, expected in (("BaselineClosed", "PASS"), ("BaselineOpen", "FAIL")):
+        path = os.path.join(work, name + ".blend")
+        result = subprocess.run([sys.executable, os.path.abspath(__file__), path, "--az", "4", "--elev", "5", "--res", "128"],
+                                capture_output=True, text=True)
+        lines = [line for line in result.stdout.splitlines() if line.startswith("LODCHECK")]
+        actual = lines[-1].split()[1] if lines else "ERROR"
+        ok = actual == expected
+        passed &= ok
+        print(f"LODBASELINE {name} expected={expected} actual={actual} {'PASS' if ok else 'FAIL'}")
+    print(f"LODBASELINE {'PASS' if passed else 'FAIL'} closed=PASS open=FAIL")
+    sys.exit(0 if passed else 1)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("asset", help="output/<asset> (폴더) 또는 .blend")
+    ap.add_argument("asset", nargs="?", help="output/<asset> (폴더) 또는 .blend")
+    ap.add_argument("--self-test", action="store_true", help="closed cube PASS and open-front cube FAIL baseline")
     ap.add_argument("--az", type=int, default=16, help="방위각 개수 (기본 16 = 22.5도 간격)")
     ap.add_argument("--elev", default="-10,5,25,50", help="올려다봄(-)·내려다봄(+) 각도들")
     ap.add_argument("--res", type=int, default=512)
     ap.add_argument("--quick", action="store_true", help="16시점·해상도 256 (반복용; 보고용 아님, 결과 줄이 LODCHECK QUICK)")
     a = ap.parse_args()
+    if a.self_test:
+        baseline_self_test()
+    if not a.asset:
+        ap.error("asset is required unless --self-test is used")
     if a.quick:
         a.az, a.elev, a.res = 8, "5,50", 256
 

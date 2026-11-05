@@ -147,14 +147,17 @@ def verdict(name, a, b, tol, unit=""):
     return f"{tag} {name}: photo {a:.2f}{unit} / model {b:.2f}{unit} ({diff * 100:+.0f}%)"
 
 
-def check_satellite(ref, meshes, tex, base):
+def check_satellite(ref, meshes, tex, base, prepared=None):
     W, D = extents(meshes, "top")
-    w, h = int(W * PX_PER_M), int(D * PX_PER_M)
-    img = Image.open(os.path.join(base, ref["file"])).convert("RGB")
     c = ref["corners"]
-    photo = warp(img, [c[3], c[2], c[1], c[0]], w, h)            # back-left at top-left, front at the bottom
-    model, _ = model_view(meshes, tex, 0, 90)
-    model = model.resize((w, h))
+    if prepared is None:
+        w, h = int(W * PX_PER_M), int(D * PX_PER_M)
+        img = Image.open(os.path.join(base, ref["file"])).convert("RGB")
+        photo = warp(img, [c[3], c[2], c[1], c[0]], w, h)        # back-left at top-left, front at the bottom
+        model, _ = model_view(meshes, tex, 0, 90)
+        model = model.resize((w, h))
+    else:
+        photo, model = prepared
     me = edges(gray(model), 88)
     pe = edges(gray(photo), 85)
     out = []
@@ -170,14 +173,17 @@ def check_satellite(ref, meshes, tex, base):
     return out
 
 
-def check_facade(ref, meshes, tex, base):
+def check_facade(ref, meshes, tex, base, prepared=None):
     side = ref.get("side", "front")
     Wm, Hm = extents(meshes, side)
-    w, h = int(Wm * PX_PER_M), int(Hm * PX_PER_M)
-    img = Image.open(os.path.join(base, ref["file"])).convert("RGB")
-    photo = warp(img, ref["corners"], w, h)
-    model, _ = model_view(meshes, tex, YAW[side], 0)
-    model = model.resize((w, h))
+    if prepared is None:
+        w, h = int(Wm * PX_PER_M), int(Hm * PX_PER_M)
+        img = Image.open(os.path.join(base, ref["file"])).convert("RGB")
+        photo = warp(img, ref["corners"], w, h)
+        model, _ = model_view(meshes, tex, YAW[side], 0)
+        model = model.resize((w, h))
+    else:
+        photo, model = prepared
     gp, gm = gray(photo), gray(model)
     out = []
     fp, sp = period(rows_profile(gp), PX_PER_M, 1.2, 6.5)
@@ -187,8 +193,8 @@ def check_facade(ref, meshes, tex, base):
         if abs(fm - fp) / fp > TOL_FLOOR:
             line += f"  -> photo shows ~{Hm / fp:.0f} floor bands over the wall height, model ~{Hm / fm:.0f}" + \
                     (" (model needs MORE floors or lower floor height)" if fp < fm else " (model needs FEWER floors or taller floors)")
-        if sp < 0.15:
-            line = line.replace("MISMATCH", "INFO    ") + " (weak pattern in photo - check by eye)"
+        if min(sp, sm) < 0.15:
+            line = line.replace("MISMATCH", "INFO    ") + " (weak pattern in photo or model - LOW_CONFIDENCE, check by eye)"
     out.append(line)
     bp, sbp = period(cols_profile(gp), PX_PER_M, 1.5, 12.0)
     bm, _ = period(cols_profile(gm), PX_PER_M, 1.5, 12.0)
@@ -210,6 +216,10 @@ def main():
         return
     with open(a.refs, encoding="utf-8-sig") as f:
         refs = json.load(f)
+    total = int(bool(refs.get("satellite"))) + len(refs.get("facades", []))
+    if total == 0:
+        p("[photo] FAIL: photo_refs.json contains no satellite or facade checks")
+        sys.exit(2)
     base = os.path.dirname(os.path.abspath(a.refs))
     asset, meshes, texdir, _ = load_asset(a.path)
     tex = Tex(texdir, asset, False, "color")
@@ -230,7 +240,7 @@ def main():
     for l in lines:
         p("   " + l)
     n = sum(l.startswith("MISMATCH") for l in lines)
-    p(f"[photo] {n} mismatch(es), {len(failed)} failed check(s). Sheets: previews/photo_check/")
+    p(f"[photo] {n} mismatch(es), checks {total - len(failed)}/{total}, failed {len(failed)}. Sheets: previews/photo_check/")
     sys.exit(2 if failed else 1 if n else 0)
 
 

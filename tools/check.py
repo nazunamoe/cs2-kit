@@ -36,6 +36,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import proj  # noqa: E402,F401  (decides the project folder, chdir; must come before argparse)
 from objio import MAPS, load_asset, load_png, tex_path  # noqa: E402
+from agent_actions import agent_summary as _agent_summary  # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # Windows 콘솔(cp949)에서 한글·기호 출력 오류 방지
@@ -154,36 +155,59 @@ class RayMesh:
         self.lo = self.T.min(1); self.hi = self.T.max(1)
 
     def hit(self, o, d, maxd):
-        """가장 가까운 불투명 교차 거리 (없으면 inf)."""
-        end = o + d * maxd
-        lo, hi = np.minimum(o, end) - 1e-6, np.maximum(o, end) + 1e-6
-        m = np.all((self.hi >= lo) & (self.lo <= hi), axis=1)
-        if not m.any():
-            return np.inf
-        T, UV = self.T[m], self.UV[m]
-        v0, v1, v2 = T[:, 0], T[:, 1], T[:, 2]
-        e1, e2 = v1 - v0, v2 - v0
-        h = np.cross(d, e2); a = (e1 * h).sum(1)
-        ok = np.abs(a) > 1e-12
-        f = np.where(ok, 1.0 / np.where(ok, a, 1), 0)
-        s = o - v0
-        uu = f * (s * h).sum(1)
-        q = np.cross(s, e1)
-        vv = f * (q * d).sum(1)
-        t = f * (e2 * q).sum(1)
-        hitm = ok & (uu >= -1e-9) & (vv >= -1e-9) & (uu + vv <= 1 + 1e-9) & (t > 1e-4) & (t < maxd)
-        if not hitm.any():
-            return np.inf
-        ids = np.nonzero(hitm)[0]
-        for i in ids[np.argsort(t[ids])]:
-            if self.alpha is None:
-                return t[i]
-            uv = UV[i, 0] * (1 - uu[i] - vv[i]) + UV[i, 1] * uu[i] + UV[i, 2] * vv[i]
-            H, W = self.alpha.shape
-            px = int(np.clip(uv[0] * W, 0, W - 1)); py = int(np.clip((1 - uv[1]) * H, 0, H - 1))
-            if self.alpha[py, px] >= 127.5:
-                return t[i]
-        return np.inf
+        return self.hits(np.asarray([o]), np.asarray([d]), maxd)[0]
+
+    def hits(self, origins, directions, maxd):
+        """Nearest opaque hit for each ray, using only AABB candidates in each batch."""
+        origins = np.asarray(origins, float)
+        directions = np.asarray(directions, float)
+        result = np.full(len(origins), np.inf)
+        for start in range(0, len(origins), 32):
+            O = origins[start:start + 32, None, :]
+            D = directions[start:start + 32, None, :]
+            end = O + D * maxd
+            lo, hi = np.minimum(O, end) - 1e-6, np.maximum(O, end) + 1e-6
+            broad = np.all((self.hi[None] >= lo) & (self.lo[None] <= hi), axis=2)
+            candidates = [np.nonzero(row)[0] for row in broad]
+            width = max((len(ids) for ids in candidates), default=0)
+            if not width:
+                continue
+            indices = np.zeros((len(O), width), dtype=np.int32)
+            valid = np.zeros((len(O), width), dtype=bool)
+            for b, ids in enumerate(candidates):
+                if len(ids):
+                    indices[b, :len(ids)] = ids
+                    valid[b, :len(ids)] = True
+            T = self.T[indices]
+            UV = self.UV[indices]
+            v0, v1, v2 = T[:, :, 0], T[:, :, 1], T[:, :, 2]
+            e1, e2 = v1 - v0, v2 - v0
+            h = np.cross(D, e2)
+            a = (e1 * h).sum(2)
+            ok = np.abs(a) > 1e-12
+            f = np.where(ok, 1.0 / np.where(ok, a, 1), 0)
+            s = O - v0
+            uu = f * (s * h).sum(2)
+            q = np.cross(s, e1)
+            vv = f * (q * D).sum(2)
+            t = f * (e2 * q).sum(2)
+            hitm = valid & ok & (uu >= -1e-9) & (vv >= -1e-9) & (uu + vv <= 1 + 1e-9) & (t > 1e-4) & (t < maxd)
+            for b in range(len(O)):
+                ids = np.nonzero(hitm[b])[0]
+                if not len(ids):
+                    continue
+                ids = ids[np.argsort(t[b, ids])]
+                if self.alpha is None:
+                    result[start + b] = t[b, ids[0]]
+                    continue
+                for i in ids:
+                    uv = UV[b, i, 0] * (1 - uu[b, i] - vv[b, i]) + UV[b, i, 1] * uu[b, i] + UV[b, i, 2] * vv[b, i]
+                    H, W = self.alpha.shape
+                    px = int(np.clip(uv[0] * W, 0, W - 1)); py = int(np.clip((1 - uv[1]) * H, 0, H - 1))
+                    if self.alpha[py, px] >= 127.5:
+                        result[start + b] = t[b, i]
+                        break
+        return result
 
 
 def rect_overlaps(R, eps=1e-7):
@@ -374,13 +398,17 @@ def check_asset(path, args):
             Wq = M[wk].quads()
             Wn, _ = normals(Wq)
             blocked, behind = [], []
-            for i in range(len(Wq)):
-                p, n = Wq[i], Wn[i]
-                for o in (p.mean(0), p[0] * 0.85 + p[2] * 0.15, p[2] * 0.85 + p[0] * 0.15):
-                    if rm.hit(o + n * 0.005, n, args.ray) < args.ray:
-                        blocked.append(np.round(p.mean(0), 2).tolist()); break
-                if wk == "win" and rm.hit(p.mean(0) - n * 0.001, -n, 1.0) == np.inf:
-                    behind.append(np.round(p.mean(0), 2).tolist())
+            if len(Wq):
+                centers = Wq.mean(1)
+                sample_points = np.stack((centers, Wq[:, 0] * 0.85 + Wq[:, 2] * 0.15,
+                                          Wq[:, 2] * 0.85 + Wq[:, 0] * 0.15), axis=1)
+                origins = (sample_points + Wn[:, None, :] * 0.005).reshape(-1, 3)
+                directions = np.repeat(Wn[:, None, :], 3, axis=1).reshape(-1, 3)
+                distances = rm.hits(origins, directions, args.ray).reshape(-1, 3)
+                blocked = [np.round(centers[i], 2).tolist() for i in range(len(Wq)) if (distances[i] < args.ray).any()]
+                if wk == "win":
+                    back_distances = rm.hits(centers - Wn * 0.001, -Wn, 1.0)
+                    behind = [np.round(centers[i], 2).tolist() for i in range(len(Wq)) if back_distances[i] == np.inf]
             info["win_blocked"][wk] = len(blocked)
             if blocked:
                 err("win_block_" + wk, f"WIN_BLOCKED {wk}: {len(blocked)} windows blocked by a part within {args.ray} m in front. example = window center xyz", blocked)
@@ -412,37 +440,10 @@ def print_report(r):
                 print(f"       e.g. {ex}")
 
 
-_FIX_TEXT = {
-    "REDUCE_MAIN_DETAIL": "main 이 95000 tris 를 넘음. 층수·bay·창 위치는 유지하고 숨은 면과 보조 디테일만 줄임",
-    "REDUCE_LOD_DETAIL": "LOD1/LOD2 에서 작은 부품을 제거. 프리셋 모드면 해당 LOD 호출에 quality_stage=3 전달",
-    "FIX_CUSTOM_UV": "ATLAS_UV 만 해당. custom quad UV 를 A.uv_full/A.uv_tile 등 atlas helper 로 교체",
-    "FIX_WINDOW_UV": "WindowSet.add_face 로 창을 다시 만들고 custom window UV 를 제거. 창 겹침 여부도 확인",
-    "REMOVE_DEGENERATE_FACES": "퇴화 면의 좌표를 확인하고 중복 호출 또는 같은 위치의 정점을 제거",
-}
-
-
 def agent_summary(r):
     """r = check_asset() 의 반환값. action_tags 는 [CS2_AGENT_SUMMARY] 로 호출 에이전트에게
-    기계적으로 파싱 가능한 한 줄 JSON 으로 내보낸다 (TOOLS.md 의 대응표와 _FIX_TEXT 가 같은 내용)."""
-    i = r["info"]
-    err_keys = {e["key"] for e in r["errors"]}
-    warn_keys = {w["key"] for w in r["warnings"]}
-    tags = []
-    if "tris" in warn_keys:
-        tags.append("REDUCE_MAIN_DETAIL")
-    if "lod1" in err_keys or "lod2" in err_keys:
-        tags.append("REDUCE_LOD_DETAIL")
-    if "atlas" in err_keys:
-        tags.append("FIX_CUSTOM_UV")
-    if "win_uv" in err_keys:
-        tags.append("FIX_WINDOW_UV")
-    if "degenerate" in warn_keys:
-        tags.append("REMOVE_DEGENERATE_FACES")
-    fix = "; ".join(_FIX_TEXT[t] for t in tags) if tags else "no fix needed"
-    lod_name = {"main": "LOD0", "lod1": "LOD1", "lod2": "LOD2"}
-    verts = {lod_name[k]: v for k, v in i.get("verts", {}).items() if k in lod_name}
-    return dict(status="FAIL" if r["errors"] else "PASS", verts=verts,
-                action_tags=tags, exact_fix_instruction=fix)
+    기계적으로 파싱 가능한 한 줄 JSON 으로 내보낸다 (TOOLS.md 의 대응표와 agent_actions.FIX_TEXT 가 같은 내용)."""
+    return _agent_summary(r)
 
 
 def main():
