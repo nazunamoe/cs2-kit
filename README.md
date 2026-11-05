@@ -36,6 +36,18 @@ python tools/project.py new my-building --template generic
 2. `TASK.md`에 아는 정보를 적고, 모르는 값은 비워 둡니다.
 3. 실제 단지 이름·브랜드·로고는 에셋 이름과 텍스처에 사용하지 않습니다.
 
+### GLB가 있으면 매스부터 자동 재구성
+
+전체 가로·세로·높이만 참고하지 않고, 여러 높이에서 자른 외곽선을 단순화해 L자·각진 평면과 단차 볼륨을 `generic_spec.json`으로 만듭니다.
+
+```bash
+python tools/project.py new my-building --template generic
+python tools/agent.py glb-mass --project my-building --json -- photos/scan.glb --list
+python tools/agent.py glb-mass --project my-building --json -- photos/scan.glb --mesh-index 3 --out generic_spec.json --force
+```
+
+`previews/glb/shape.png`와 `shape_report.json`을 확인한 뒤 생성된 벽 ID에 창·입면 부품을 연결합니다. `--levels 6,12`로 확인된 높이 경계를 직접 지정할 수도 있습니다. `--force`는 기존 spec의 창과 부품까지 바꾸므로 입면 작업 후에는 다른 출력 파일을 사용하세요. 원본 GLB 메시·텍스처는 에셋에 복사하지 않습니다. 자세한 절차는 [GLB 매스 재구성](docs/agent/GLB_MASS.md)을 참고하세요.
+
 ## 3. Codex / Kimi Code로 실행
 
 키트 루트에서 Codex 또는 Kimi Code를 엽니다. `AGENTS.md`의 작업 규칙을 따르게 하고, 첫 환경 점검을 실행합니다.
@@ -129,6 +141,7 @@ Windows에서는 PowerShell 7과 UTF-8을 권장합니다. 네이티브 편집�
 - [전체 작업 절차](docs/agent/WORKFLOW.md)
 - [도구와 API](TOOLS.md)
 - [상세 모델링 지침](docs/agent/MODELING.md)
+- [GLB 기반 매스 재구성](docs/agent/GLB_MASS.md)
 - [GLB 없는 사진 증거 작업](docs/agent/PHOTO_ONLY.md)
 - [상가·학교·비정형 볼륨](docs/agent/VOLUMES.md)
 - [메모리 범위](docs/agent/MEMORY.md)

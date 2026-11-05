@@ -10,6 +10,15 @@ python tools/project.py new my-building --template generic
 
 This copies `example_generic_cs2.py` as the project generator and `templates/generic_spec.example.json` as `generic_spec.json`. Edit the JSON data rather than writing a new geometry engine.
 
+When a GLB exists, generate the initial `volumes` from its multi-height footprints instead of copying the synthetic example or drawing only a bounding box:
+
+```bash
+python tools/agent.py glb-mass --project my-building --json -- photos/scan.glb --list
+python tools/agent.py glb-mass --project my-building --json -- photos/scan.glb --mesh-index 3 --out generic_spec.json --force
+```
+
+Inspect the generated footprint preview and report, then add openings using the generated wall IDs. See `GLB_MASS.md` for scale, orientation, explicit height boundaries, overwrite safety, and scan limitations.
+
 ## Schema
 
 ```yaml

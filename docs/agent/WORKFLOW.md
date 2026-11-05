@@ -13,6 +13,8 @@ python tools/agent.py resume --project <project> --json
 
 Read `TASK.md`, the selected generator, and only references needed for that building type. Use native editing tools when available. Never interpolate source into shell strings. `tools/put.py` and `tools/edit.py` are fallbacks.
 
+If GLB/GLTF exists, reconstruct the mass before drawing it manually. `doctor` lists scans and returns a `glb-mass --list` action for a new project. Select building meshes, generate simplified multi-height footprints into `generic_spec.json`, and inspect `previews/glb/shape.png` plus its report. See `docs/agent/GLB_MASS.md`. Source geometry and textures remain references only.
+
 ## 2. Photos without repeated image reads
 
 ```bash
