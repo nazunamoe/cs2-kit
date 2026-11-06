@@ -8,46 +8,65 @@ notes: >
   no brand, logo, or sign text. Reuse as the default 2020s apartment finish.
 
 palette:
-  wall: [206, 206, 201]
-  wall_light: [224, 224, 219]
-  stone: [88, 92, 96]
-  band: [228, 227, 222]
-  pier: [78, 82, 87]
-  accent: [34, 45, 58]
+  wall: [212, 211, 206]
+  wall_light: [230, 229, 224]
+  stone: [86, 89, 93]
+  band: [234, 233, 228]
+  trim: [244, 244, 240]
+  pier: [74, 78, 83]
+  accent: [31, 42, 55]
   door: [35, 37, 40]
   frame: [46, 49, 54]
   louver: [46, 50, 54]
+  vent: [132, 146, 154]
+  spandrel: [168, 182, 190]
   screen: [36, 40, 44]
   roof: [150, 150, 146]
   solar: [30, 44, 64]
   led: [255, 246, 226]
 
 window:
-  width_m: 1.85
-  height_m: 1.55
-  sill_m: 0.85
-  panes: 3
-  glass: [58, 76, 92]
-  frame: [196, 196, 191]
-  frame_width_m: 0.065
-  frame_depth_m: 0.030
+  # fallback window (single punched bay)
+  width_m: 1.55
+  height_m: 1.48
+  sill_m: 0.88
+  panes: 2
+  glass: [54, 72, 88]
+  frame: [198, 198, 193]
+  frame_width_m: 0.120
+  frame_depth_m: 0.034
+  # per-bay families observed on the 101 facade
+  wide_width_m: 2.55
+  wide_height_m: 1.62
+  wide_sill_m: 0.78
+  narrow_width_m: 0.55
+  narrow_height_m: 1.90
+  narrow_sill_m: 0.55
+  std_width_m: 1.35
+  std_height_m: 1.48
+  std_sill_m: 0.88
+  front_width_m: 1.55
+  front_height_m: 1.58
+  front_sill_m: 0.82
   night_color: [255, 255, 255]
-  night_lit_ratio: 0.38
+  night_lit_ratio: 0.32
   night_patch_grid: 24
 
 layers:
   band_height_m: 0.18
   band_shadow_m: 0.08
-  spandrel_height_m: 0.22
+  spandrel_height_m: 0.42
   louver_width_m: 0.44
   louver_every: 2
+  pier_width_m: 0.12
+  corner_post_m: 0.14
   wall_tile_m: [3.0, 2.83]
   stone_tile_m: [3.0, 2.83]
   window_tile_m: [3.0, 2.83]
 
 night:
   color: [255, 255, 255]
-  lit_ratio: 0.38
+  lit_ratio: 0.32
   patch_grid: 24
   note: hashed per-window-cell patches, not per-building floodlight
 

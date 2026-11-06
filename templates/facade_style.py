@@ -15,10 +15,95 @@ import glob
 import os
 from types import SimpleNamespace
 
-import yaml
+try:
+    import yaml
+except ImportError:  # Blender's bundled Python has no PyYAML
+    yaml = None
 
 
 REQUIRED = ("id", "palette", "window", "layers")
+
+
+def _scalar(value):
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    low = value.lower()
+    if low in ("true", "false"):
+        return low == "true"
+    if low in ("null", "none", "~", ""):
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
+
+def _value(text):
+    text = text.strip()
+    if text.startswith("[") and text.endswith("]"):
+        body = text[1:-1].strip()
+        if not body:
+            return []
+        return [_scalar(part) for part in body.split(",")]
+    return _scalar(text)
+
+
+def _mini_yaml(text):
+    """Parse the small mapping/list subset used by templates/styles/*.yaml.
+
+    This is the fallback for Blender, whose Python does not ship PyYAML.
+    It handles nested mappings, inline lists and skips `>` block scalars.
+    """
+    data = {}
+    stack = [(-1, data)]
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        raw = lines[i]
+        i += 1
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        line = raw.strip()
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        parent = stack[-1][1]
+        if value in (">", "|", ">-", "|-"):
+            parent[key] = ""
+            while i < len(lines):
+                nxt = lines[i]
+                if nxt.strip() and (len(nxt) - len(nxt.lstrip(" "))) <= indent:
+                    break
+                i += 1
+            continue
+        if value == "":
+            child = {}
+            parent[key] = child
+            stack.append((indent, child))
+        else:
+            parent[key] = _value(value)
+    return data
+
+
+def load_style(path):
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    data = (yaml.safe_load(text) if yaml is not None else _mini_yaml(text)) or {}
+    missing = [key for key in REQUIRED if key not in data]
+    if missing:
+        raise ValueError(f"{path}: style missing {', '.join(missing)}")
+    return Style(data, path)
+
 
 
 class Style:
@@ -52,15 +137,6 @@ class Style:
 
     def to_dict(self):
         return dict(self.data)
-
-
-def load_style(path):
-    with open(path, encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-    missing = [key for key in REQUIRED if key not in data]
-    if missing:
-        raise ValueError(f"{path}: style missing {', '.join(missing)}")
-    return Style(data, path)
 
 
 def list_styles(directory):
