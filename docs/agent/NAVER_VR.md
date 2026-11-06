@@ -29,6 +29,7 @@ A Chrome instance must already run with remote debugging port 9222 and the Naver
 Capture time is dominated by browser rendering, stable-frame screenshots, vertical overlap, and the number of directions/buildings. Reduce only unnecessary work:
 
 - Use `--dongs` and `--fit-wall --angles 4` for targeted work.
+- Use `--width 0.10 --center` when the whole wall must fit in one frame: the camera backs off to the viewer limit, the target is centered, and `sweep` saves one image per direction instead of top/bottom segments. Resolution drops, so use a larger browser viewport for measurement.
 - Increase `--width`/`--wall-frac` only when more source pixels are needed; larger values can require more images.
 - Keep overlap sufficient to avoid holes in floor/paint evidence.
 - Completed buildings with the identical capture configuration are skipped. Changed settings recapture that building; `--overwrite` forces recapture.
