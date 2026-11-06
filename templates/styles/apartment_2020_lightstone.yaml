@@ -39,6 +39,12 @@ window:
   wide_width_m: 2.55
   wide_height_m: 1.62
   wide_sill_m: 0.78
+  medium_width_m: 2.05
+  medium_height_m: 1.62
+  medium_sill_m: 0.78
+  small_width_m: 0.95
+  small_height_m: 1.48
+  small_sill_m: 0.88
   narrow_width_m: 0.55
   narrow_height_m: 1.90
   narrow_sill_m: 0.55
