@@ -33,8 +33,8 @@ python tools/style_catalog.py --project P --validate
 python tools/brief.py --project P --text "2010s slab apartment 25 floors" --json
 ```
 
-`tools/brief.py` is a deterministic parser/scaffold, not an LLM call. A
-DeepSeek parser can fill the same `building_brief.yaml` schema later; the
+`tools/brief.py` is a deterministic parser/scaffold, not an LLM call. An
+agent or LLM parser can fill the same `building_brief.yaml` schema later; the
 geometry still has to pass quick/visual/final.
 
 ## Adding a style

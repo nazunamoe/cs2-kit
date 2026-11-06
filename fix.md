@@ -1,8 +1,9 @@
 # CS2 kit improvement log
 
-Applied on `deepseek-work` (4-8), on top of `deepseek` (1-3).
+Originally written on `deepseek-work`; items 1-8 were cherry-picked to
+`claude-work` (the 101 palette tuning commits were not).
 
-## 1-3 (deepseek)
+## 1-3
 - mesh-hash FBX/LOD cache: `tools/cycle.py`
 - LOD hole coordinates + margin warning: `tools/qa/lod_check.py`, `tools/qa/lod_check_bl.py`
 - face map + corner-view warning: `tools/face_map.py`

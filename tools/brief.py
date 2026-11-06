@@ -5,8 +5,8 @@
   python tools/brief.py --project P --text "2020년대 타워 36층" --glb photos/scan.glb
 
 This is a deterministic parser, not an LLM call. It selects a style from
-templates/styles and marks every uncertain field as estimated. A DeepSeek
-parser can later fill the same schema; the geometry must still pass the normal
+templates/styles and marks every uncertain field as estimated. An agent or
+LLM parser can later fill the same schema; the geometry must still pass the normal
 mass/facade gates.
 """
 import argparse
