@@ -9,8 +9,11 @@ notes: >
 
 palette:
   wall: [212, 211, 206]
+  wall_dark: [100, 108, 134]
   wall_light: [230, 229, 224]
-  stone: [86, 89, 93]
+  stone: [78, 78, 89]
+  stone_light: [96, 97, 108]
+  stone_dark: [58, 60, 70]
   band: [234, 233, 228]
   trim: [244, 244, 240]
   pier: [74, 78, 83]
@@ -45,6 +48,9 @@ window:
   small_width_m: 0.95
   small_height_m: 1.48
   small_sill_m: 0.88
+  slot_width_m: 0.95
+  slot_height_m: 1.90
+  slot_sill_m: 0.55
   narrow_width_m: 0.55
   narrow_height_m: 1.90
   narrow_sill_m: 0.55
@@ -56,7 +62,7 @@ window:
   front_sill_m: 0.82
   night_color: [255, 255, 255]
   night_lit_ratio: 0.32
-  night_patch_grid: 24
+  night_patch_grid: 5  # must match cs2kit.WindowSet REF_GRID (household cells)
 
 layers:
   band_height_m: 0.18
@@ -73,8 +79,8 @@ layers:
 night:
   color: [255, 255, 255]
   lit_ratio: 0.32
-  patch_grid: 24
-  note: hashed per-window-cell patches, not per-building floodlight
+  patch_grid: 5
+  note: exactly 8 of 25 hashed household cells lit (32%), white whole-window emission
 
 zones:
   front: dense windows + widened dark core
