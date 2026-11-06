@@ -491,7 +491,7 @@ def hold_az(pg, az, tries=4):
     return cur
 
 
-def sweep(pg, box, out, name, n0, overlap, extra, shots, az_hold=None):
+def sweep(pg, box, out, name, n0, overlap, extra, shots, az_hold=None, center=False):
     """이동 범위 맨 위 -> 아래로 화면 높이의 (1-overlap) 씩, 더 안 내려가면 멈춤.
     뷰어 이동 범위를 위·아래로 화면 높이의 extra 만큼 넓혀서 찍고, 끝나면 원래 범위로 되돌린다.
     <동>_side<번호>.png 로 저장하고 다음 번호를 돌려준다."""
@@ -509,6 +509,9 @@ def sweep(pg, box, out, name, n0, overlap, extra, shots, az_hold=None):
         ytop, ybot = hi[1], lo[1]
     else:
         ytop, ybot = ty, ty
+    if center:
+        mid = (ytop + ybot) / 2.0
+        ytop = ybot = mid
     step = scr_h * (1 - overlap)
     n, y, last = n0, ytop, None
     try:
@@ -880,7 +883,8 @@ def capture_dong(pg, d, q, out, args):
                     fit_width(pg, bpts, args.wall_frac)
                     wait_rest(pg)
                 shots = []
-                n1 = sweep(pg, box, out, name, n, args.overlap, args.extra, shots, az_hold=real_az)
+                n1 = sweep(pg, box, out, name, n, args.overlap, args.extra, shots, az_hold=real_az,
+                           center=args.center)
                 for s in shots:
                     s["angle_deg"] = round(k * 360 / nang)
                     if fc > 0.9:
@@ -898,7 +902,8 @@ def capture_dong(pg, d, q, out, args):
                 if k and abs((real_az - az0) + math.radians(ang)) > 0.02:
                     log(f"[{name}] WARN 방위각이 안 돌아감 (want {-ang}, got {math.degrees(real_az - az0):.1f})")
                 shots = []
-                n1 = sweep(pg, box, out, name, n, args.overlap, args.extra, shots, az_hold=real_az)
+                n1 = sweep(pg, box, out, name, n, args.overlap, args.extra, shots, az_hold=real_az,
+                           center=args.center)
                 for s in shots:
                     s["angle_deg"] = ang
                 meta["shots"] += shots
@@ -1234,6 +1239,8 @@ def main():
         x.add_argument("--width", type=float, default=0.4, help="건물 폭 / 화면 폭")
         x.add_argument("--overlap", type=float, default=0.3)
         x.add_argument("--extra", type=float, default=0.05, help="맨 위·맨 아래를 화면 높이의 이만큼 더 이동")
+        x.add_argument("--center", action="store_true",
+                       help="이동 범위 중앙에서 한 장만 찍는다(전체 면을 한 프레임에 담을 때)")
         x.add_argument("--angles", type=int, default=None, help="방향 수 (기본 8, --fit-wall 이면 4 = 가장 긴 면 정면부터 90도씩)")
         x.add_argument("--quality", default="고화질", help="화질 버튼 값 (빈 문자열이면 그대로)")
         x.add_argument("--out")
