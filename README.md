@@ -123,6 +123,7 @@ python tools/agent.py evidence --project my-apt --json -- validate
 - `/build`: 전체 제작
 - `/resume`: 저장된 다음 행동부터 재개
 - `/photo-refs`: 사진 모서리 좌표 생성·검증
+- `/photo-observe`: 벽 사진을 확대·체크리스트로 읽고 측정값과 교차 확인 후 기록
 - `/fix <요청>`: 범위 수정, 최종 검증, 변경 범위 비교
 
 스킬은 `tools/agent.py`를 호출합니다. 별도 검사기나 중복된 모델링 규칙을 두지 않습니다.

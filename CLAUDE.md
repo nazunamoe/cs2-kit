@@ -19,6 +19,7 @@
 - `/build [추가 요청]`: TASK 기반 전체 제작
 - `/resume`: 저장된 상태와 `next_action`부터 재개
 - `/photo-refs`: 연락판과 대표 사진으로 사진 좌표 생성·검증
+- `/photo-observe`: 벽 사진 한 장을 확대·체크리스트로 읽고 교차 확인 후 `agent.py observe`로 기록
 - `/fix <요청>`: 스냅샷 → 범위 수정 → final gate → outside-scope 비교 → 이미지 review
 
 스킬은 공통 `tools/agent.py`를 호출한다. 스킬에 별도 검사기나 긴 모델링 규칙을 복사하지 않는다. 도구의 상세 명령은 `TOOLS_CLAUDE.md`를 필요할 때 읽는다.
