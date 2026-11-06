@@ -1,0 +1,40 @@
+# Example brief produced by tools/brief.py (heuristic; review before building)
+brief:
+  text: "2010s slab apartment 25 floors"
+  style: apartment_2010_slab
+  style_label: 2010s slab apartment
+  era: 2010s
+  building_type: slab_apartment
+  floors: 25
+  floor_height_m: 2.85
+  balcony: expanded
+  window: split
+  region: ""
+  confidence:
+    floors: high
+    style: high
+  estimated:
+    - palette
+    - window bay counts
+    - entrance
+    - roof equipment
+  source: heuristic parser; replace with GLB/photo measurements when available
+  mass: ""
+  glb: ""
+style_summary:
+  palette:
+    wall: [211, 208, 199]
+    band: [232, 229, 220]
+    pier: [91, 88, 83]
+  window:
+    width_m: 1.70
+    height_m: 1.50
+    sill_m: 0.90
+    night_lit_ratio: 0.32
+  night:
+    color: [255, 250, 235]
+    lit_ratio: 0.32
+    patch_grid: 20
+next_action:
+  command: null
+  reason: review this brief/style, then create or select a project and generate the mass before facade work

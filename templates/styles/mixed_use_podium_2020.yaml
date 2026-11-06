@@ -1,0 +1,58 @@
+id: mixed_use_podium_2020
+label: 2020s mixed-use podium
+era: 2020s
+type: mixed_use
+tags: [mixed-use, podium, retail, apartment]
+notes: >
+  Generic mixed-use starting point: glazed retail podium, residential tower,
+  neutral metal/stone palette. Geometry must come from a mass spec or a brief.
+
+palette:
+  wall: [201, 202, 198]
+  wall_light: [221, 222, 218]
+  stone: [72, 75, 78]
+  band: [226, 226, 222]
+  pier: [62, 66, 70]
+  accent: [30, 42, 54]
+  door: [30, 32, 35]
+  frame: [42, 46, 50]
+  louver: [44, 48, 52]
+  screen: [34, 38, 42]
+  roof: [145, 146, 143]
+  solar: [28, 42, 60]
+  led: [255, 245, 225]
+
+window:
+  width_m: 2.20
+  height_m: 1.80
+  sill_m: 0.55
+  panes: 3
+  glass: [48, 66, 82]
+  frame: [190, 192, 190]
+  frame_width_m: 0.070
+  frame_depth_m: 0.035
+  night_color: [255, 255, 255]
+  night_lit_ratio: 0.42
+  night_patch_grid: 24
+
+layers:
+  band_height_m: 0.16
+  band_shadow_m: 0.08
+  spandrel_height_m: 0.18
+  louver_width_m: 0.45
+  louver_every: 2
+  wall_tile_m: [3.0, 3.0]
+  stone_tile_m: [3.0, 3.0]
+  window_tile_m: [3.0, 3.0]
+
+night:
+  color: [255, 255, 255]
+  lit_ratio: 0.42
+  patch_grid: 24
+  note: bright retail podium + scattered residential lights
+
+zones:
+  front: shopfront/podium glazing below, residential windows above
+  back: service/back-of-house, fewer openings
+  sides: mixed punched windows
+  entrance: recessed lobby with canopy
