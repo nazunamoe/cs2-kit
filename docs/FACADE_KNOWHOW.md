@@ -2,6 +2,10 @@
 
 특정 건물 값은 없다. 건물 하나에만 해당하는 사실은 그 프로젝트 메모에 둔다.
 
+> cs2kit에서 평면 ref의 측정 column, per-cell paint, 이미지 crop 비교,
+> household 점등, LOD corner post를 다룰 때는
+> `docs/agent/FACADE_MEASURED.md`를 먼저 따른다.
+
 ## 1. 순서 (한 면씩 끝낸다)
 1. 사진 전부 보기 → 면마다 어느 면인지 정하기(창 패턴이 아니라 옥상 실루엣·동 번호 글자로).
 2. 스캔 정사영(20 px/m)으로 덩어리 → zone(같은 마감 구간) → 창 목록 → 특수 요소.
