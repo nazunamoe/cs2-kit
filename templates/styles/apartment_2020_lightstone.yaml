@@ -1,0 +1,60 @@
+id: apartment_2020_lightstone
+label: 2020s light-stone apartment
+era: 2020s
+type: tower_apartment
+tags: [apartment, tower, light-stone, dark-glass, white-frame, louver]
+notes: >
+  Derived from the Namsan 101 facade study. Neutral geometry/palette only;
+  no brand, logo, or sign text. Reuse as the default 2020s apartment finish.
+
+palette:
+  wall: [206, 206, 201]
+  wall_light: [224, 224, 219]
+  stone: [88, 92, 96]
+  band: [228, 227, 222]
+  pier: [78, 82, 87]
+  accent: [34, 45, 58]
+  door: [35, 37, 40]
+  frame: [46, 49, 54]
+  louver: [46, 50, 54]
+  screen: [36, 40, 44]
+  roof: [150, 150, 146]
+  solar: [30, 44, 64]
+  led: [255, 246, 226]
+
+window:
+  width_m: 1.85
+  height_m: 1.55
+  sill_m: 0.85
+  panes: 3
+  glass: [58, 76, 92]
+  frame: [196, 196, 191]
+  frame_width_m: 0.065
+  frame_depth_m: 0.030
+  night_color: [255, 255, 255]
+  night_lit_ratio: 0.38
+  night_patch_grid: 24
+
+layers:
+  band_height_m: 0.18
+  band_shadow_m: 0.08
+  spandrel_height_m: 0.22
+  louver_width_m: 0.44
+  louver_every: 2
+  wall_tile_m: [3.0, 2.83]
+  stone_tile_m: [3.0, 2.83]
+  window_tile_m: [3.0, 2.83]
+
+night:
+  color: [255, 255, 255]
+  lit_ratio: 0.38
+  patch_grid: 24
+  note: hashed per-window-cell patches, not per-building floodlight
+
+zones:
+  front: dense windows + widened dark core
+  front_left_narrow: 3 narrow columns + blue-grey strip
+  back: dense windows
+  left: windowed long side
+  right: dark sign end wall
+  steps: punched windows + louver slots

@@ -1,0 +1,60 @@
+id: apartment_2010_slab
+label: 2010s slab apartment
+era: 2010s
+type: slab_apartment
+tags: [apartment, slab, warm-stone, balcony-expanded]
+notes: >
+  Generic 2010s Korean slab-apartment finish. Use as a starting point when
+  only a natural-language brief exists; dimensions remain estimated until a
+  GLB/photo measurement is supplied.
+
+palette:
+  wall: [211, 208, 199]
+  wall_light: [226, 223, 214]
+  stone: [104, 101, 95]
+  band: [232, 229, 220]
+  pier: [91, 88, 83]
+  accent: [48, 58, 68]
+  door: [40, 41, 43]
+  frame: [62, 63, 64]
+  louver: [58, 60, 62]
+  screen: [48, 51, 54]
+  roof: [151, 149, 142]
+  solar: [36, 48, 64]
+  led: [255, 244, 222]
+
+window:
+  width_m: 1.70
+  height_m: 1.50
+  sill_m: 0.90
+  panes: 2
+  glass: [66, 82, 92]
+  frame: [218, 216, 208]
+  frame_width_m: 0.060
+  frame_depth_m: 0.025
+  night_color: [255, 250, 235]
+  night_lit_ratio: 0.32
+  night_patch_grid: 20
+
+layers:
+  band_height_m: 0.22
+  band_shadow_m: 0.07
+  spandrel_height_m: 0.20
+  louver_width_m: 0.40
+  louver_every: 3
+  wall_tile_m: [3.0, 2.90]
+  stone_tile_m: [3.0, 2.90]
+  window_tile_m: [3.0, 2.90]
+
+night:
+  color: [255, 250, 235]
+  lit_ratio: 0.32
+  patch_grid: 20
+  note: warm-white scattered household lights
+
+zones:
+  front: regular window grid with central stair/lobby core
+  back: regular window grid
+  left: windowed side
+  right: windowed side
+  entrance: flat canopy with lobby glazing
