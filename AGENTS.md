@@ -82,6 +82,16 @@ Use `WindowSet.add_face` for windows. Use atlas UV helpers for custom quads. `ax
 - Memory scope: `docs/agent/MEMORY.md`
 - PowerShell editing fallback: `docs/agent/POWERSHELL.md`
 
+## Refinement checklist (lessons from the elife_duryu multi-tower work)
+
+Before reporting a tower or revising a first-pass build, in this order:
+1. Verify floor count and roof heights from scan orthographic tops (`pair_ortho` views 0/180/90, ±0.1 m); convert frame z to generator z and subtract the 1.6 m `with_parapets` rim.
+2. Compare sibling/twin towers' zone lists for missing pieces (parapets, roof boxes) before measuring anything new.
+3. Compare the same camera: photo vs model (`cmp_cam`), scan vs model (`pair_ortho`), and zoom 2x on small details. Re-run `final` before `pair_ortho` (visual-only builds give mismatched textures).
+4. Apply a user instruction ("no entrances", "same windows") to every instance at once, left and right, all faces.
+5. Windows within 0.05 m of a wall-piece end silently vanish; check counts after adding windows.
+6. Run `lod_check` and record the image review before any PASS report. Put building-specific numbers in the project `shape_notes.md`, generalizable lessons in `memory/LESSONS.md` (see its 2026-11-07 sections).
+
 ## Final report
 
 Report files, exact gate/check statuses, warnings, FBX status, estimated values, remaining photo/tile issues and reasons, and in-game checks: real scale, window grid, alpha, flicker, night lights, front direction, colors, entrance, and signature registration.
