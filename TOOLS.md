@@ -110,7 +110,7 @@ python tools/run_blender.py --obj G -- --out output
 python tools/run_blender.py G -- --out output
 ```
 
-`--obj` skips FBX for fast iteration. Without `--obj`, the bpy module is used when found, otherwise Blender; `RUN_BLENDER_ENGINE=exe` forces the app. `pip install bpy` in a matching venv (Blender 5.0 → Python 3.11) writes the same FBX headlessly, with no Blender install; `tools/run_blender.py --fbx2obj` can also read FBX back without Blender. `compare.py diff --box` fails on mesh changes outside the box; window UVs are compared by position because atlas allocation can reorder them.
+`--obj` skips FBX for fast iteration. Without `--obj`, the bpy module is used when found, otherwise Blender; `RUN_BLENDER_ENGINE=exe` forces the app. `pip install bpy` in a matching venv (Blender 5.0 → Python 3.11) writes the same FBX headlessly, with no Blender install; `tools/run_blender.py --fbx2obj` can also read FBX back without Blender. The LOD check prefers the Blender app when present (Workbench renders ~5x faster there) and otherwise uses bpy; `LOD_ENGINE=exe|py` forces one. `compare.py diff --box` fails on mesh changes outside the box; window UVs are compared by position because atlas allocation can reorder them.
 
 ## Preset/socket mode (v1, optional)
 

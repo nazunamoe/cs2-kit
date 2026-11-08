@@ -2,7 +2,7 @@
 (앞면이 빠졌거나 뒤집힌 곳 = 게임에서 "투명해 보이는" 곳)을 여러 각도에서 잰다. LOD 는 메인도 막혀 있는 자리만 센다.
 
 검증 도구(tools/qa/). cycle.py 다음에, 보고 전에 매번 돌린다.
-Blender 앱 없이 `bpy` 모듈로도 돈다(tools/blender_py.txt 또는 .venv-bpy 를 찾음).
+Blender 앱이 있으면 앱으로(빠름), 없으면 bpy 모듈로 돈다(`LOD_ENGINE=exe|py` 로 고정).
   python tools/qa/lod_check.py output/<asset>                # 활성 프로젝트 기준 경로
   python tools/qa/lod_check.py output/<asset> --az 16 --elev -10,5,25,50 --res 512
   python tools/qa/lod_check.py --self-test                  # closed cube PASS + open-front cube FAIL baseline
@@ -46,19 +46,49 @@ def bpy_python():
 
 def blender_exe():
     if os.environ.get("BLENDER"):
-        return os.environ["BLENDER"]
+        return os.environ["BLENDER"].strip().strip('"')
     p = os.path.join(KIT, "tools", "blender_path.txt")
     if os.path.exists(p):
         return open(p, encoding="utf-8").read().strip()
     return "blender"
 
 
-def run_bl(py_file, args, blend=None):
-    """lod_check_bl.py / 기준 생성 스크립트를 bpy 모듈 또는 Blender 앱으로 실행."""
+def _blender_ok(exe):
+    import shutil
+    return bool(exe) and (os.path.isfile(exe) or bool(shutil.which(exe)))
+
+
+def lod_engine():
+    """LOD 검사 엔진. LOD_ENGINE=exe|py 로 고정할 수 있다.
+    기본: Blender 앱이 있으면 앱(렌더가 훨씬 빠름), 없으면 bpy 모듈.
+    (FBX 쪽은 run_blender.py 가 bpy 를 먼저 쓴다 - 결과는 같고 기동이 가볍다)"""
+    kind = (os.environ.get("LOD_ENGINE") or "").strip().lower()
+    exe = blender_exe()
+    if kind in ("exe", "blender", "app"):
+        return ("exe", exe) if _blender_ok(exe) else None
     py = bpy_python()
-    if py:
-        return subprocess.run([py, py_file, "--"] + args, capture_output=True, text=True)
-    cmd = [blender_exe(), "-b"] + ([blend] if blend else []) + ["--python-exit-code", "1", "-P", py_file, "--"] + args
+    if kind in ("py", "bpy"):
+        return ("py", py) if py else None
+    if _blender_ok(exe):
+        return ("exe", exe)
+    return ("py", py) if py else None
+
+
+def run_bl(py_file, args, blend=None):
+    """lod_check_bl.py / 기준 생성 스크립트를 Blender 앱 또는 bpy 모듈로 실행."""
+    eng = lod_engine()
+    if not eng:
+        kind = (os.environ.get("LOD_ENGINE") or "").strip().lower()
+        if kind in ("exe", "blender", "app"):
+            sys.exit(f"[lod_check] LOD_ENGINE={kind} but no Blender app found ({blender_exe()})")
+        if kind in ("py", "bpy"):
+            sys.exit("[lod_check] LOD_ENGINE=bpy but no python with the bpy module was found "
+                     "(run `python tools/run_blender.py --set-py <python.exe>`)")
+        sys.exit("[lod_check] no Blender app and no bpy module - run `python tools/run_blender.py --find`")
+    kind, exe = eng
+    if kind == "py":
+        return subprocess.run([exe, py_file, "--"] + args, capture_output=True, text=True)
+    cmd = [exe, "-b"] + ([blend] if blend else []) + ["--python-exit-code", "1", "-P", py_file, "--"] + args
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
@@ -145,6 +175,9 @@ def main():
     for f in glob.glob(os.path.join(out, "*.png")):
         os.remove(f)
     bl = os.path.join(KIT, "tools", "qa", "lod_check_bl.py")
+    eng = lod_engine()
+    if eng:
+        print(f"[lod_check] engine: {'Blender app' if eng[0] == 'exe' else 'bpy module'}  {eng[1]}")
     for _ in range(2):                                 # once more on a one-off failure (file still being written)
         r = run_bl(bl, [path, out, str(a.res), str(a.az), a.elev], blend=path)
         if "LODCHECK_DONE" in r.stdout:
