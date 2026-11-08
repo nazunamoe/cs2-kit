@@ -8,7 +8,7 @@
 
 - Python 3.9 이상
 - `numpy`, `Pillow`
-- Blender 5.2 — FBX 생성과 최종 LOD 검사에 필요
+- Blender 5.2 — FBX 생성과 최종 LOD 검사 / 또는 `bpy` pip 모듈 — FBX 생성만 (앱 설치 불필요)
 
 키트 루트에서 설치와 초기 설정을 실행합니다.
 
@@ -18,7 +18,13 @@ python tools/project.py init
 python tools/run_blender.py --find
 ```
 
-Blender를 자동으로 찾지 못하면 `INSTALL.md`의 수동 경로 설정을 참고하세요.
+Blender를 자동으로 찾지 못하면 `INSTALL.md`의 수동 경로 설정을 참고하세요. Blender 앱 없이 쓰려면 전용 venv에 `bpy`를 설치합니다(Blender 5.0 → Python 3.11).
+
+```bash
+uv venv .venv-bpy --python 3.11
+uv pip install --python .venv-bpy bpy
+python tools/run_blender.py --find
+```
 
 ## 2. 새 프로젝트 만들기
 

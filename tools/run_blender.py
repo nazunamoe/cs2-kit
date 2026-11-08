@@ -1,16 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-run_blender.py — Blender 를 찾아서 생성기를 백그라운드로 실행 (PATH 설정과 무관하게 동작)
+run_blender.py — Blender(또는 bpy 모듈) 를 찾아서 생성기를 백그라운드로 실행
 
 사용:
-  python tools/run_blender.py --find                              찾기만 (찾은 경로를 tools/blender_path.txt 에 저장)
-  python tools/run_blender.py my_building_cs2.py -- --out output       Blender 사용 가능 시 FBX 까지 생성
+  python tools/run_blender.py --find                              찾기만 (경로를 tools/blender_path.txt / blender_py.txt 에 저장)
+  python tools/run_blender.py my_building_cs2.py -- --out output       FBX 까지 생성 (bpy 모듈 → Blender 앱 순)
   python tools/run_blender.py --obj my_building_cs2.py -- --out output  일반 Python 으로 OBJ 만 생성 (반복용)
   python tools/run_blender.py --fbx2obj output/<asset>                FBX → _check/*.obj (check.py·render.py 용)
-  python tools/run_blender.py --set "D:\\Blender\\blender.exe"       경로 직접 지정·저장
+  python tools/run_blender.py --set "D:\\Blender\\blender.exe"       Blender 앱 경로 직접 지정·저장
+  python tools/run_blender.py --set-py ".venv-bpy\\Scripts\\python.exe"  bpy 모듈이 설치된 Python 지정·저장
 
-찾는 순서: 환경변수 BLENDER → tools/blender_path.txt → PATH(blender) → Windows 레지스트리·Program Files·Steam
-           → macOS /Applications → Linux /usr/bin, /snap, ~/blender*
+찾는 순서(FBX): BLENDER_PY 환경변수 → tools/blender_py.txt → .venv-bpy → 현재 python(import bpy)
+                → BLENDER → tools/blender_path.txt → PATH(blender) → 레지스트리·Program Files·Steam …
+엔진 선택: RUN_BLENDER_ENGINE=py|exe|obj (기본: bpy 모듈이 있으면 py, 없으면 exe, 둘 다 없으면 obj)
 Blender 가 없으면 생성기를 일반 python 으로 실행 (cs2kit 은 OBJ 로 내보냄 → 검사·미리보기는 가능, FBX 는 안 나옴)
 """
 import glob
@@ -27,7 +29,9 @@ except Exception:
     pass
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
 SAVE = os.path.join(HERE, "blender_path.txt")
+SAVE_PY = os.path.join(HERE, "blender_py.txt")
 
 
 def _ver_key(p):
@@ -84,6 +88,46 @@ def candidates():
         for p in ["/usr/bin/blender", "/usr/local/bin/blender", "/snap/bin/blender"] + \
                  sorted(glob.glob(os.path.expanduser("~/blender*/blender")) + glob.glob("/opt/blender*/blender"), key=_ver_key, reverse=True):
             yield p
+
+
+def py_candidates():
+    """bpy 모듈이 설치된 Python 후보. (Blender 앱 없이 FBX 를 쓰기 위한 경로)"""
+    env = os.environ.get("BLENDER_PY")
+    if env:
+        yield env.strip().strip('"')
+    if os.path.exists(SAVE_PY):
+        with open(SAVE_PY, encoding="utf-8") as f:
+            yield f.read().strip().strip('"')
+    for p in (os.path.join(ROOT, ".venv-bpy", "Scripts", "python.exe"),
+              os.path.join(ROOT, ".venv-bpy", "bin", "python")):
+        if os.path.isfile(p):
+            yield p
+    yield sys.executable                      # 현재 인터프리터에 bpy 가 있을 수도
+
+
+def bpy_version(py):
+    """bpy 를 import 해서 버전 문자열을 돌려준다. 실패하면 None."""
+    try:
+        r = subprocess.run([py, "-c", "import bpy; print(bpy.app.version_string)"],
+                           capture_output=True, text=True, timeout=180)
+    except Exception:                          # noqa: BLE001
+        return None
+    out = (r.stdout or "").strip().splitlines()
+    return out[-1] if (r.returncode == 0 and out) else None
+
+
+def find_bpy(verbose=True):
+    for p in py_candidates():
+        if p and os.path.isfile(p):
+            ver = bpy_version(p)
+            if not ver:
+                continue
+            with open(SAVE_PY, "w", encoding="utf-8") as f:
+                f.write(p)
+            if verbose:
+                print(f"[bpy] {p}  (Blender {ver} module)  -> saved to {SAVE_PY}")
+            return p
+    return None
 
 
 def find_blender(verbose=True):
@@ -144,28 +188,55 @@ def main():
             f.write(p)
         print(f"[blender] saved: {p}")
         return
+    if "--set-py" in argv:
+        p = argv[argv.index("--set-py") + 1].strip('"')
+        if not os.path.isfile(p):
+            raise SystemExit(f"file not found: {p}")
+        ver = bpy_version(p)
+        if not ver:
+            raise SystemExit(f"this python has no bpy module: {p}")
+        with open(SAVE_PY, "w", encoding="utf-8") as f:
+            f.write(p)
+        print(f"[bpy] saved: {p}  (Blender {ver} module)")
+        return
     if "--find" in argv:
-        sys.exit(0 if find_blender() else 1)
+        py = find_bpy()
+        bl = find_blender()
+        sys.exit(0 if (py or bl) else 1)
     if "--fbx2obj" in argv:
         folder = os.path.abspath(argv[argv.index("--fbx2obj") + 1])
-        bl = find_blender()
-        if not bl:
-            raise SystemExit("cannot read FBX without Blender (cs2kit generators also write _check/*.obj)")
-        tmp = os.path.join(HERE, "_fbx2obj.py")
+        import tempfile
+        tmp = os.path.join(tempfile.gettempdir(), "_cs2kit_fbx2obj.py")   # 저장소를 더럽히지 않는다
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(FBX2OBJ)
+        py = find_bpy(verbose=False)
+        if py:                                  # bpy 모듈: Blender 앱 없이 FBX 읽기
+            r = subprocess.run([py, tmp, "--", folder])
+            sys.exit(r.returncode)
+        bl = find_blender()
+        if not bl:
+            raise SystemExit("cannot read FBX without Blender or bpy "
+                             "(cs2kit generators also write _check/*.obj)")
         r = subprocess.run([bl, "--background", "--factory-startup", "--python", tmp, "--", folder])
         sys.exit(r.returncode)
     if not argv:
         print(__doc__)
         return
     script = os.path.abspath(argv[0])
-    bl = None if force_obj else find_blender(verbose=True)
-    if bl:
+    engine = (os.environ.get("RUN_BLENDER_ENGINE") or "").strip().lower()
+    py = bl = None
+    if not force_obj:
+        if engine in ("", "py"):
+            py = find_bpy(verbose=True)
+        if not py and engine in ("", "exe", "blender"):
+            bl = find_blender(verbose=True)
+    if py:
+        cmd = [py, script] + gen_args          # bpy 모듈: 일반 python 처럼 실행
+    elif bl:
         cmd = [bl, "--background", "--factory-startup", "--python-exit-code", "1", "--python", script, "--"] + gen_args
     else:
         if not force_obj:
-            print("[blender] Blender not found -> running with plain python (OBJ only, NO FBX)")
+            print("[blender] no bpy module / Blender -> running with plain python (OBJ only, NO FBX)")
         cmd = [sys.executable, script] + gen_args
     print("[run] " + " ".join(f'"{c}"' if " " in c else c for c in cmd))
     r = subprocess.run(cmd, cwd=os.path.dirname(script))

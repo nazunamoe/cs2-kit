@@ -97,7 +97,7 @@ def next_for(status, generator, mode="quick"):
     if status == "PASS":
         return {"command": None, "reason": "all requested checks passed"}
     if status == "INCOMPLETE":
-        return {"command": command("final", generator), "reason": "run the missing final checks; Blender is required for FBX and LOD"}
+        return {"command": command("final", generator), "reason": "run the missing final checks; FBX needs Blender or the bpy module, LOD needs Blender"}
     if status == "FAIL":
         return {"command": command(mode, generator), "reason": f"fix the reported errors, then rerun the {mode} check"}
     return {"command": f"python tools/agent.py doctor --project {NAME} --json", "reason": "inspect the project state"}
@@ -263,7 +263,9 @@ def glb_mass(args):
 def doctor(args):
     require_project()
     import importlib.util
-    from run_blender import find_blender
+    from run_blender import find_blender, find_bpy
+    bpy = find_bpy(verbose=False)
+    blender = None if bpy else find_blender(verbose=False)
     generators = sorted(f for f in os.listdir(ROOT) if f.endswith("_cs2.py"))
     scans = []
     for base, _, names in os.walk(os.path.join(ROOT, "photos")):
@@ -278,7 +280,8 @@ def doctor(args):
         "status": "OK", "project": NAME, "project_root": ROOT,
         "generators": generators, "glb_files": scans,
         "dependencies": {n: importlib.util.find_spec(n) is not None for n in ("numpy", "PIL")},
-        "blender": find_blender(verbose=False), "photo_refs": os.path.isfile(os.path.join(ROOT, "photo_refs.json")),
+        "blender": blender, "bpy": bpy, "fbx_engine": "bpy" if bpy else ("blender" if blender else None),
+        "photo_refs": os.path.isfile(os.path.join(ROOT, "photo_refs.json")),
         "state": os.path.relpath(STATE, ROOT) if state else None,
         "current_stage": state.get("current_stage"), "visual_review": state.get("visual_review", "NOT_CHECKED"),
         "next_action": next_action,

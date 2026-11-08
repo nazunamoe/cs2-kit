@@ -15,21 +15,33 @@
 1. Extract the kit into a writable folder.
 2. Install Python 3.9+ and run `pip install numpy pillow`.
 3. Run `python tools/project.py init`.
-4. Install Blender 5.2 for FBX and full LOD checks.
-5. Run `python tools/run_blender.py --find`, or register manually:
+4. FBX export needs Blender **or** the `bpy` Python module. The module needs no app install:
+   its wheels track one Python version (Blender 5.0 → 3.11, 5.1 → 3.13), so use a dedicated venv.
+
+   ```bash
+   uv venv .venv-bpy --python 3.11
+   uv pip install --python .venv-bpy bpy
+   python tools/run_blender.py --find
+   ```
+
+   Or point it at an existing install:
 
    ```bash
    python tools/run_blender.py --set "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe"
+   python tools/run_blender.py --set-py ".venv-bpy\Scripts\python.exe"
    ```
 
-6. Create a project and add photos/TASK values:
+   `run_blender.py` prefers the bpy module (same exporter, headless); set `RUN_BLENDER_ENGINE=exe` to force Blender.
+   Without either it still writes OBJ (`--obj`), which covers checks, previews and LOD checks.
+
+5. Create a project and add photos/TASK values:
 
    ```bash
    python tools/project.py new my-apt
    # or: python tools/project.py new my-apt --template cw
    ```
 
-7. Start Claude Code at the kit root and run `/build`.
+6. Start Claude Code at the kit root and run `/build`.
 
 The project contains `TASK.md`, `STATUS.md`, `photos/`, and a copied generator. Reference photos stay in `photos/`; output assets go to `output/`; state and observations go to `work/`.
 
