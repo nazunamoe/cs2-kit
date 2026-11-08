@@ -52,7 +52,10 @@ class Tex:
         p = tex_path(texdir, asset, name, lod2) or tex_path(texdir, asset, name)
         self.img = _u8(p) if p else np.full((4, 4, 4), 255, np.uint8)
         bp = tex_path(texdir, asset, "BaseColor", lod2) or tex_path(texdir, asset, "BaseColor")
-        self.alpha = _u8(bp)[..., 3] if bp else np.full(self.img.shape[:2], 255, np.uint8)
+        if mode == "color" and p and bp and os.path.abspath(bp) == os.path.abspath(p):
+            self.alpha = self.img[..., 3]                  # 같은 PNG 를 두 번 디코드하지 않는다 (4096² 361 ms)
+        else:
+            self.alpha = _u8(bp)[..., 3] if bp else np.full(self.img.shape[:2], 255, np.uint8)
         npth = tex_path(texdir, asset, "Normal", lod2)
         self.nrm = _u8(npth, "RGB") if (npth and mode == "color") else None
         ep = tex_path(texdir, asset, "Emissive", lod2)
@@ -60,23 +63,43 @@ class Tex:
         self.H, self.W = self.img.shape[:2]
 
 
-def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=False,
-           label=True, cull=False, mask=False):
-    T, UV, KIND = [], [], []
+def _collect_tris(parts, box):
+    """(M,3,3) 삼각형, (M,3,2) UV, (M,) kind. quad 메쉬는 numpy 로 한 번에 만든다."""
+    T, UV, K = [], [], []
     for mesh, kind in parts:
-        if mesh is None:
+        if mesh is None or not mesh.faces:
             continue
-        for f, uv in zip(mesh.faces, mesh.uvs):
+        faces = mesh.faces
+        if box is None and all(len(f) == 4 for f in faces):
+            F = np.array(faces, np.int32)
+            V = mesh.verts[F]                                  # (n,4,3)
+            U = np.asarray(mesh.uvs, dtype=float)              # (n,4,2)
+            T.append(np.stack((V[:, [0, 1, 2]], V[:, [0, 2, 3]]), 1).reshape(-1, 3, 3))
+            UV.append(np.stack((U[:, [0, 1, 2]], U[:, [0, 2, 3]]), 1).reshape(-1, 3, 2))
+            K.append(np.full(2 * len(faces), kind))
+            continue
+        for f, uv in zip(faces, mesh.uvs):
             q = mesh.verts[f]
             if box is not None:
                 c = q.mean(0)
                 if not (box[0] <= c[0] <= box[1] and box[2] <= c[1] <= box[3] and box[4] <= c[2] <= box[5]):
                     continue
             for k in range(1, len(f) - 1):
-                T.append(q[[0, k, k + 1]]); UV.append(uv[[0, k, k + 1]]); KIND.append(kind)
+                T.append(q[[0, k, k + 1]][None]); UV.append(np.asarray(uv)[[0, k, k + 1]][None]); K.append(np.full(1, kind))
     if not T:
+        return None, None, None
+    return np.concatenate(T), np.concatenate(UV), np.concatenate(K)
+
+
+MAX_FRAG = 1 << 17          # 한 배치의 (삼각형 x 픽셀) 원소 수 상한
+_NO_BATCH = False           # 디버그: True 면 모든 삼각형을 기존 순차 경로로
+
+
+def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=False,
+           label=True, cull=False, mask=False):
+    T, UV, KIND = _collect_tris(parts, box)
+    if T is None:
         return Image.new("RGB", size, "white")
-    T = np.array(T); UV = np.array(UV); KIND = np.array(KIND)
     if cull:
         d = np.array([-math.sin(math.radians(yaw)) * math.cos(math.radians(pitch)),
                       -math.cos(math.radians(yaw)) * math.cos(math.radians(pitch)),
@@ -104,25 +127,133 @@ def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=Fa
     img = (np.zeros((H, W, 3)) if mask else
            np.ones((H, W, 3)) * (SKY * (0.2 if night else 1)))
     zb = np.full((H, W), np.inf)
-    order = list(np.nonzero(KIND != "glass")[0]) + list(np.nonzero(KIND == "glass")[0])
-    for i in order:
+    zb_flat, img_flat = zb.reshape(-1), img.reshape(-1, 3)
+    owner = np.full(H * W, 0x7FFFFFFF, np.int64)     # 동률일 때 작은 삼각형 인덱스가 이기게 (순차 처리와 동일)
+
+    # ---- 화면 경계 상자 (모든 삼각형을 한 번에)
+    xlo = np.floor(X.min(1)); xhi = np.ceil(X.max(1))
+    ylo = np.floor(Y.min(1)); yhi = np.ceil(Y.max(1))
+    onscr = (xhi >= 0) & (ylo <= H - 1) & (yhi >= 0) & (xlo <= W - 1)
+    bx0 = np.clip(xlo, 0, W - 1).astype(np.int32); bx1 = np.clip(xhi, 0, W - 1).astype(np.int32)
+    by0 = np.clip(ylo, 0, H - 1).astype(np.int32); by1 = np.clip(yhi, 0, H - 1).astype(np.int32)
+    bw = (bx1 - bx0 + 1).astype(np.int64); bh = (by1 - by0 + 1).astype(np.int64)
+
+    ax, bx_, cx_ = X[:, 0], X[:, 1], X[:, 2]
+    ay, by, cy_ = Y[:, 0], Y[:, 1], Y[:, 2]
+    den = (by - cy_) * (ax - cx_) + (cx_ - bx_) * (ay - cy_)
+    good = onscr & (np.abs(den) >= 1e-9) & (bw > 0) & (bh > 0)
+    # 아래 계수들은 기존 구현과 '비트 단위로 같은' 결과를 내도록 일부러 곱/나눗셈 순서를 유지한다.
+    # (UV 가 아틀라스 셀 경계에 걸친 면에서 1 ULP 차이가 다른 셀을 집어 색이 통째로 바뀐다)
+    e0, e1 = by - cy_, cx_ - bx_
+    e2, e3 = cy_ - ay, ax - cx_
+    den = np.where(good, den, 1.0)
+    da0, da1, da2 = dpt[:, 0], dpt[:, 1], dpt[:, 2]
+    U0, U1, U2 = UV[:, 0, 0], UV[:, 1, 0], UV[:, 2, 0]
+    V0, V1, V2 = UV[:, 0, 1], UV[:, 1, 1], UV[:, 2, 1]
+    if tex is not None:
+        tW, tH = tex.W, tex.H
+        timg = tex.img.reshape(-1, 4)
+        talpha = None if (tex.alpha is None or bool((tex.alpha >= 128).all())) else tex.alpha.reshape(-1)
+        tnrm = None if tex.nrm is None else tex.nrm.reshape(-1, 3)
+        temis = None if tex.emis is None else tex.emis.reshape(-1, 3)
+    else:                                              # backface_check 등 텍스처 없는 호출
+        tW = tH = 1
+        timg = talpha = tnrm = temis = None
+    emis_k = (1.0 if night else 0.35) / 255.0
+    is_glass = (KIND == "glass")
+    opq = np.nonzero(good & ~is_glass)[0]
+    glass = np.nonzero(good & is_glass)[0]
+
+    # ---- 불투명: 화면 크기별 버킷 → 배치 (픽셀당 최소 depth, 동률은 작은 인덱스)
+    area = bw * bh
+    kbit = np.clip(np.ceil(np.log2(np.maximum(area, 1))).astype(np.int32), 0, 12)
+    big = opq if _NO_BATCH else opq[area[opq] > 4096]
+    for kb in np.unique(kbit[opq]):
+        if (1 << kb) > 4096:
+            continue
+        sel = opq[(kbit[opq] == kb) & (area[opq] <= 4096)]
+        if not len(sel):
+            continue
+        K = 1 << int(kb)
+        step = max(1, min(len(sel), MAX_FRAG // K))
+        for c0 in range(0, len(sel), step):
+            ids = sel[c0:c0 + step]
+            bwv, bhv = bw[ids][:, None], bh[ids][:, None]
+            kk = np.arange(K)[None, :]
+            dx = np.minimum(kk % bwv, bwv - 1)
+            dy = np.minimum(kk // bwv, bhv - 1)
+            valid = kk < bwv * bhv
+            pxs = bx0[ids][:, None] + dx
+            pys = by0[ids][:, None] + dy
+            ex = pxs + 0.5 - cx_[ids][:, None]
+            ey = pys + 0.5 - cy_[ids][:, None]
+            dv = den[ids][:, None]
+            w0 = ((e0[ids][:, None] * ex) + (e1[ids][:, None] * ey)) / dv
+            w1 = ((e2[ids][:, None] * ex) + (e3[ids][:, None] * ey)) / dv
+            w2 = 1 - w0 - w1
+            ins = valid & (w0 >= -1e-6) & (w1 >= -1e-6) & (w2 >= -1e-6)
+            if not ins.any():
+                continue
+            dep = w0 * da0[ids][:, None] + w1 * da1[ids][:, None] + w2 * da2[ids][:, None]
+            pix = pys * W + pxs
+            prev, prev_own = zb_flat[pix], owner[pix]
+            tri_row = np.broadcast_to(ids[:, None], pix.shape)
+            vis = ins & ((dep < prev) | ((dep == prev) & (tri_row < prev_own)))
+            if talpha is not None:
+                u = w0 * U0[ids][:, None] + w1 * U1[ids][:, None] + w2 * U2[ids][:, None]
+                v = w0 * V0[ids][:, None] + w1 * V1[ids][:, None] + w2 * V2[ids][:, None]
+                tpx = np.clip((u * tW).astype(np.int32), 0, tW - 1)
+                tpy = np.clip(((1 - v) * tH).astype(np.int32), 0, tH - 1)
+                flat = tpy * tW + tpx
+                vis &= talpha[flat] >= 128
+            fidx = np.nonzero(vis.ravel())[0]
+            if not len(fidx):
+                continue
+            depv = dep.ravel()[fidx]; pixv = pix.ravel()[fidx]
+            o = np.lexsort((fidx, depv, pixv))          # 픽셀 → depth → 먼저 온 삼각형
+            ps = pixv[o]
+            first = np.empty(len(ps), bool); first[0] = True
+            np.not_equal(ps[1:], ps[:-1], out=first[1:])
+            win = o[first]
+            wpix = pixv[win]
+            zb_flat[wpix] = depv[win]
+            owner[wpix] = ids[fidx[win] // K]
+            if mask:
+                img_flat[wpix] = 1.0
+                continue
+            tri = ids[fidx[win] // K]
+            w0w, w1w, w2w = w0.ravel()[fidx[win]], w1.ravel()[fidx[win]], w2.ravel()[fidx[win]]
+            u = w0w * U0[tri] + w1w * U1[tri] + w2w * U2[tri]
+            v = w0w * V0[tri] + w1w * V1[tri] + w2w * V2[tri]
+            tpx = np.clip((u * tW).astype(np.int32), 0, tW - 1)
+            tpy = np.clip(((1 - v) * tH).astype(np.int32), 0, tH - 1)
+            flat = tpy * tW + tpx
+            bump = 1.0
+            if tnrm is not None:
+                nn = tnrm[flat] / 127.5 - 1
+                bump = 1 + 0.6 * (nn[:, 0] * 0.4 - nn[:, 1] * 0.5)
+            sh = (shade[tri] * bump / 255.0)[:, None]
+            col = sh * (timg[flat][:, :3] if timg is not None else 255.0)
+            if temis is not None:
+                col = col + temis[flat] * emis_k
+            img_flat[wpix] = col
+
+    # ---- 큰 불투명 삼각형과 유리는 기존 방식(적은 수)
+    tail = np.concatenate((big, glass)) if (len(big) + len(glass)) else ()
+    for i in tail:
+        i = int(i)
         xa, ya, da = X[i], Y[i], dpt[i]
-        x0, x1 = int(max(0, math.floor(xa.min()))), int(min(W - 1, math.ceil(xa.max())))
-        y0, y1 = int(max(0, math.floor(ya.min()))), int(min(H - 1, math.ceil(ya.max())))
-        if x1 < x0 or y1 < y0:
-            continue
-        gx, gy = np.meshgrid(np.arange(x0, x1 + 1) + 0.5, np.arange(y0, y1 + 1) + 0.5)
-        (ax, bx, cx), (ay, by, cyy) = xa, ya
-        den = (by - cyy) * (ax - cx) + (cx - bx) * (ay - cyy)
-        if abs(den) < 1e-9:
-            continue
-        w0 = ((by - cyy) * (gx - cx) + (cx - bx) * (gy - cyy)) / den
-        w1 = ((cyy - ay) * (gx - cx) + (ax - cx) * (gy - cyy)) / den
+        x0, x1 = int(bx0[i]), int(bx1[i])
+        y0, y1 = int(by0[i]), int(by1[i])
+        gx = np.arange(x0, x1 + 1) + 0.5
+        gy = np.arange(y0, y1 + 1) + 0.5
+        w0 = (e0[i] * (gx[None, :] - cx_[i]) + e1[i] * (gy[:, None] - cy_[i])) / den[i]
+        w1 = (e2[i] * (gx[None, :] - cx_[i]) + e3[i] * (gy[:, None] - cy_[i])) / den[i]
         w2 = 1 - w0 - w1
         m = (w0 >= -1e-6) & (w1 >= -1e-6) & (w2 >= -1e-6)
         if not m.any():
             continue
-        dep = w0 * da[0] + w1 * da[1] + w2 * da[2]
+        dep = w0 * da0[i] + w1 * da1[i] + w2 * da2[i]
         sub = zb[y0:y1 + 1, x0:x1 + 1]
         reg = img[y0:y1 + 1, x0:x1 + 1]
         if mask:
@@ -130,21 +261,21 @@ def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=Fa
             sub[upd] = dep[upd]
             reg[upd] = 1.0
             continue
-        if KIND[i] == "glass":
+        if is_glass[i]:
             upd = m & (dep < sub)
             reg[upd] = reg[upd] * 0.62 + GLS * 0.38 * (0.3 if night else 1)
             continue
-        else:
-            u = w0 * UV[i, 0, 0] + w1 * UV[i, 1, 0] + w2 * UV[i, 2, 0]
-            v = w0 * UV[i, 0, 1] + w1 * UV[i, 1, 1] + w2 * UV[i, 2, 1]
-            px = np.clip((u * tex.W).astype(int), 0, tex.W - 1); py = np.clip(((1 - v) * tex.H).astype(int), 0, tex.H - 1)
-            bump = 1.0
-            if tex.nrm is not None:
-                nn = tex.nrm[py, px] / 127.5 - 1
-                bump = 1 + 0.6 * (nn[..., 0] * 0.4 - nn[..., 1] * 0.5)
-            col = tex.img[py, px][..., :3] * (shade[i] * bump / 255.0)[..., None]
-            if tex.emis is not None:
-                col = col + tex.emis[py, px] * ((1.0 if night else 0.35) / 255.0)
+        u = w0 * U0[i] + w1 * U1[i] + w2 * U2[i]
+        v = w0 * V0[i] + w1 * V1[i] + w2 * V2[i]
+        px = np.clip((u * tW).astype(int), 0, tW - 1); py = np.clip(((1 - v) * tH).astype(int), 0, tH - 1)
+        bump = 1.0
+        if tnrm is not None:
+            nn = tex.nrm[py, px] / 127.5 - 1
+            bump = 1 + 0.6 * (nn[..., 0] * 0.4 - nn[..., 1] * 0.5)
+        col = (tex.img[py, px][..., :3] if tex is not None else 255.0) * (shade[i] * bump / 255.0)[..., None]
+        if temis is not None:
+            col = col + tex.emis[py, px] * emis_k
+        if talpha is not None:
             m = m & (tex.alpha[py, px] >= 128)
         upd = m & (dep < sub)
         sub[upd] = dep[upd]
@@ -198,14 +329,13 @@ def _view_job(arg):
     return render(parts, tex, yaw, pitch, size, title, zoom, box, night, label)
 
 
-def _file_sha(h, path):
-    h.update(os.path.basename(path).encode("utf-8"))
-    with open(path, "rb") as f:
-        for block in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(block)
+def _file_sig(h, path):
+    """Content hash 대신 (이름, 크기, mtime). 4096² PNG 12장을 매번 읽지 않는다."""
+    st = os.stat(path)
+    h.update(f"{os.path.basename(path)}:{st.st_size}:{st.st_mtime_ns}".encode("utf-8"))
 
 
-RENDER_CACHE_VERSION = 2
+RENDER_CACHE_VERSION = 3
 
 
 def render_cache_key(args):
@@ -219,9 +349,9 @@ def render_cache_key(args):
     files = sorted(glob.glob(os.path.join(asset_dir, "*.png")) +
                    glob.glob(os.path.join(asset_dir, "_check", "*.obj")))
     for f in files:
-        _file_sha(h, f)
+        _file_sig(h, f)
     if args.photo and os.path.isfile(args.photo):
-        _file_sha(h, os.path.abspath(args.photo))
+        _file_sig(h, os.path.abspath(args.photo))
     return h.hexdigest()
 
 
