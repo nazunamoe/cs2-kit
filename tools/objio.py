@@ -38,7 +38,47 @@ class Mesh:
         return out
 
 
+OBJ_CACHE_VERSION = 1
+OBJ_CACHE_MIN_BYTES = 256 * 1024          # 이보다 작으면 텍스트 파싱이 더 빠르다
+
+
+def _load_obj_cache(path):
+    """cs2kit.export_asset 이 남긴 <obj>.npz 사이드카. 키가 어긋나면 None → 텍스트 파싱으로 폴백."""
+    cf = path + ".npz"
+    if not os.path.exists(cf):
+        return None
+    try:
+        st = os.stat(path)
+        with np.load(cf, allow_pickle=False) as z:
+            if z["key"].item() != f"{OBJ_CACHE_VERSION}:{st.st_size}:{st.st_mtime_ns}":
+                return None
+            V, F, FL, UVT, UVO = z["V"], z["F"], z["FL"], z["UVT"], z["UVO"]
+    except Exception:                                     # noqa: BLE001 - 깨진 캐시는 없는 것으로 친다
+        return None
+    n = len(F)
+    if n and FL.min() == 4 and FL.max() == 4 and UVT.shape[0] == n * 4:   # 대부분의 메쉬: quad 고정
+        faces = F.tolist()
+        uvs = list(UVT.reshape(n, 4, 2))                  # 면마다 (4,2) 뷰
+        return Mesh(V, faces, uvs)
+    faces = [None] * n
+    uvs = [None] * n
+    for i in range(n):
+        k = int(FL[i])
+        faces[i] = F[i, :k].tolist()
+        o = int(UVO[i])
+        uvs[i] = UVT[o:o + k]
+    return Mesh(V, faces, uvs)
+
+
 def load_obj(path):
+    try:
+        # 작은 OBJ 는 텍스트 파싱이 더 빠르다(npz 로드 고정비 ~10 ms). 큰 메쉬만 캐시를 쓴다.
+        if os.path.getsize(path) >= OBJ_CACHE_MIN_BYTES:
+            cached = _load_obj_cache(path)
+            if cached is not None:
+                return cached
+    except OSError:
+        pass
     V, VT, F, FU = [], [], [], []
     with open(path) as fh:
         for line in fh:

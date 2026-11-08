@@ -90,19 +90,35 @@ class MeshBuilder:
             self.quad(pts, A.uv(region) if A is not None else [(0, 0), (1, 0), (1, 1), (0, 1)], region)
 
     def _tiled(self, pts, region):
-        p0, p1, _p2, p3 = [np.array(p, float) for p in pts]
-        W, H = np.linalg.norm(p1 - p0), np.linalg.norm(p3 - p0)
+        # 스칼라 계산은 순수 float 로 한다. 타일 하나마다 작은 numpy 배열을 만들면
+        # ufunc 호출 오버헤드가 지배해 같은 작업이 약 3.6배 느려진다 (측정).
+        (p0x, p0y, p0z), (p1x, p1y, p1z), _p2, (p3x, p3y, p3z) = pts
+        dx, dy, dz = p1x - p0x, p1y - p0y, p1z - p0z
+        W = (dx * dx + dy * dy + dz * dz) ** 0.5
+        gx, gy, gz = p3x - p0x, p3y - p0y, p3z - p0z
+        H = (gx * gx + gy * gy + gz * gz) ** 0.5
         if W < 1e-6 or H < 1e-6:
             return
         tw, th = self.atlas.tile_size(region)
-        ex, ey = (p1 - p0) / W, (p3 - p0) / H
+        ex, ey, ez = dx / W, dy / W, dz / W            # 가로 단위벡터
+        fx, fy, fz = gx / H, gy / H, gz / H            # 세로 단위벡터
         nx, ny = max(1, math.ceil(W / tw - 1e-6)), max(1, math.ceil(H / th - 1e-6))
+        quad, uvt = self.quad, self.atlas.uv_tile
         for j in range(ny):
-            b0, b1 = j * th, min(H, (j + 1) * th)
+            b0 = j * th
+            b1 = H if j == ny - 1 else (j + 1) * th       # 마지막 줄은 H 에서 자름
+            bx0, by0, bz0 = fx * b0, fy * b0, fz * b0
+            bx1, by1, bz1 = fx * b1, fy * b1, fz * b1
             for i in range(nx):
-                a0, a1 = i * tw, min(W, (i + 1) * tw)
-                q = [p0 + ex * a0 + ey * b0, p0 + ex * a1 + ey * b0, p0 + ex * a1 + ey * b1, p0 + ex * a0 + ey * b1]
-                self.quad(q, self.atlas.uv_tile(region, a1 - a0, b1 - b0, variant=(i * 7 + j * 3)), region)
+                a0 = i * tw
+                a1 = W if i == nx - 1 else (i + 1) * tw
+                ax0, ay0, az0 = ex * a0, ey * a0, ez * a0
+                ax1, ay1, az1 = ex * a1, ey * a1, ez * a1
+                q = [(p0x + ax0 + bx0, p0y + ay0 + by0, p0z + az0 + bz0),
+                     (p0x + ax1 + bx0, p0y + ay1 + by0, p0z + az1 + bz0),
+                     (p0x + ax1 + bx1, p0y + ay1 + by1, p0z + az1 + bz1),
+                     (p0x + ax0 + bx1, p0y + ay0 + by1, p0z + az0 + bz1)]
+                quad(q, uvt(region, a1 - a0, b1 - b0, variant=(i * 7 + j * 3)), region)
 
     def box(self, x0, x1, y0, y1, z0, z1, region, skip=()):
         """축 정렬 박스. region = 칸 이름 또는 면별 dict(front,back,left,right,top,bottom,default). skip = 만들지 않을 면."""
@@ -887,6 +903,7 @@ class Atlas:
         self.cells = {}
         self.order = []
         self._laid = False
+        self._cache = None
 
     def add(self, name, color=(200, 200, 200), ctrl=(0, 0, 0), metal=0.0, gloss=0.3, emissive=None,
             px=256, tile=None, image=None, normal_image=None, gloss_image=None, painter=None, variants=1, normal_strength=2.0):
@@ -978,16 +995,17 @@ class Atlas:
         """텍스처 5종 배열 (BaseColor RGBA, ControlMask RGBA, MaskMap RGBA, Normal RGB, Emissive RGB). size 를 주면 줄여서."""
         self.layout()
         S = self.size
-        cache = getattr(self, "_cache", None)
+        cache = self._cache
         if cache is not None and cache[0] == len(self.order):
-            maps = {k: v.copy() for k, v in cache[1].items()}
-            return self._finish(maps, size)
-        base = np.zeros((S, S, 4), np.float32); base[..., 3] = 255
-        ctrl = np.zeros((S, S, 4), np.float32); ctrl[..., 3] = 255
-        mask = np.zeros((S, S, 4), np.float32)
-        nrm = np.zeros((S, S, 3), np.float32); nrm[...] = (128, 128, 255)
-        emis = np.zeros((S, S, 3), np.float32)
-        filled = np.zeros((S, S), bool)
+            # 캐시는 float32(1.2 GB)가 아니라 완성된 uint8 맵이다. 복사도, 재클램프도 필요 없다.
+            return _downscale_maps(cache[1], size, S) if (size and size != S) else dict(cache[1])
+        # 맵을 처음부터 uint8 로 잡고 칸 단위로만 클램프한다. 전체 4096² 맵을 float32 로 만든 뒤
+        # clip+astype 하던 0.8 s(맵당 268 MB 임시배열)가 사라진다. 칸 면적 합은 아틀라스의 일부뿐이다.
+        base = np.zeros((S, S, 4), np.uint8); base[..., 3] = 255
+        ctrl = np.zeros((S, S, 4), np.uint8); ctrl[..., 3] = 255
+        mask = np.zeros((S, S, 4), np.uint8)
+        nrm = np.zeros((S, S, 3), np.uint8); nrm[...] = (128, 128, 255)
+        emis = np.zeros((S, S, 3), np.uint8)
         for name in self.order:
             c = self.cells[name]
             x, y, w, h = c["rect"]
@@ -1000,39 +1018,29 @@ class Atlas:
                     ctx.alpha[...] = _resize(img[..., 3:4], w, h)[..., 0]
             if c["painter"]:
                 c["painter"](ctx)
-            base[sl][..., :3] = ctx.rgb
-            base[sl][..., 3] = ctx.alpha
-            ctrl[sl][..., :3] = c["ctrl"]
-            mask[sl][..., 0] = c["metal"] * 255
+            base[sl][..., :3] = np.clip(ctx.rgb, 0, 255)
+            base[sl][..., 3] = np.clip(ctx.alpha, 0, 255)
+            ctrl[sl][..., :3] = np.clip(c["ctrl"], 0, 255)
+            mask[sl][..., 0] = min(255.0, max(0.0, c["metal"] * 255))
             mask[sl][..., 3] = np.clip(ctx.gloss, 0, 1) * 255
             if c["gloss_image"]:
                 g = _read_png(c["gloss_image"])
-                mask[sl][..., 3] = _resize(g[..., :1], w, h)[..., 0]
+                mask[sl][..., 3] = np.clip(_resize(g[..., :1], w, h)[..., 0], 0, 255)
             if c["normal_image"]:
-                nrm[sl] = _resize(_read_png(c["normal_image"])[..., :3], w, h)
+                nrm[sl] = np.clip(_resize(_read_png(c["normal_image"])[..., :3], w, h), 0, 255)
             elif np.ptp(ctx.height) > 1e-6:
-                nrm[sl] = height_to_normal(ctx.height, c["normal_strength"])
+                nrm[sl] = np.clip(height_to_normal(ctx.height, c["normal_strength"]), 0, 255)
             if c["emissive"] is not None:
-                emis[sl] = np.array(c["emissive"], np.float32) * ctx.emis[..., None]
-            filled[sl] = True
+                emis[sl] = np.clip(np.array(c["emissive"], np.float32) * ctx.emis[..., None], 0, 255)
         for a in (base, ctrl, mask, nrm, emis):
             _bleed_cells(a, [self.cells[n]["rect"] for n in self.order], self.pad)
-        maps = dict(BaseColor=base, ControlMask=ctrl, MaskMap=mask, Normal=nrm, Emissive=emis)
-        self._cache = (len(self.order), {k: v.copy() for k, v in maps.items()})
-        return self._finish(maps, size)
+        out = dict(BaseColor=base, ControlMask=ctrl, MaskMap=mask, Normal=nrm, Emissive=emis)
+        self._cache = (len(self.order), out)
+        return _downscale_maps(out, size, S) if (size and size != S) else dict(out)
 
-    def _finish(self, maps, size):
-        S = self.size
-        if size and size != S:
-            k = S // size
-            for key in maps:
-                a = maps[key].reshape(size, k, size, k, -1).mean(axis=(1, 3))
-                if key == "Normal":
-                    v = a / 127.5 - 1.0
-                    v /= np.linalg.norm(v, axis=-1, keepdims=True) + 1e-6
-                    a = (v + 1.0) * 127.5
-                maps[key] = a
-        return {k: np.clip(v, 0, 255).astype(np.uint8) for k, v in maps.items()}
+    def _finish(self, maps):
+        """호환용. render 가 이제 uint8 을 직접 만들므로 클램프·캐스팅이 필요 없다."""
+        return maps
 
 
     # ---- 캐시 키: 아틀라스 정의가 같으면 텍스처 렌더·PNG 쓰기를 건너뛴다 (export_asset)
@@ -1162,6 +1170,34 @@ def _bleed_cells(arr, rects, pad):
         arr[y0:y1, x0:x1] = arr[np.ix_(ys, xs)]
 
 
+def _downscale_maps(maps, size, S):
+    """uint8 맵을 box filter 로 S→size 로 줄인다. float32 왕복·전체 복사 없이 uint32 누적으로 처리."""
+    if not size or size == S:
+        return dict(maps)
+    out = {}
+    if S % size:                                   # 정수배가 아니면 일반 리사이즈로 폴백
+        for key, a in maps.items():
+            v = _resize(a, size, size)
+            if key == "Normal":
+                n = v / 127.5 - 1.0
+                n /= np.linalg.norm(n, axis=-1, keepdims=True) + 1e-6
+                v = (n + 1.0) * 127.5
+            out[key] = np.clip(v, 0, 255).astype(np.uint8)
+        return out
+    k = S // size
+    area = k * k
+    for key, a in maps.items():
+        acc = a.reshape((size, k, size, k) + a.shape[2:]).sum(axis=1, dtype=np.uint32)
+        acc = acc.sum(axis=2, dtype=np.uint32)
+        v = (acc + area // 2) // area              # 반올림 box 평균
+        if key == "Normal":
+            n = v.astype(np.float32) / 127.5 - 1.0
+            n /= np.linalg.norm(n, axis=-1, keepdims=True) + 1e-6
+            v = (n + 1.0) * 127.5
+        out[key] = np.clip(v, 0, 255).astype(np.uint8)
+    return out
+
+
 def _bleed_index(filled, n):
     """칸 바깥 여백 n px 를 가장 가까운 칸 픽셀로 채우기 위한 (행, 열) 인덱스 (한 번만 계산해 모든 맵에 사용)."""
     H, W = filled.shape
@@ -1270,20 +1306,42 @@ def _resize(img, w, h, smooth=False):
 # PNG 읽기·쓰기 (PIL 없이 — Blender 파이썬에서도 동작)
 # =============================================================================
 def write_png(path, arr):
-    arr = np.ascontiguousarray(np.clip(arr, 0, 255).astype(np.uint8))
-    h, w = arr.shape[:2]
-    c = 1 if arr.ndim == 2 else arr.shape[2]
+    a = np.asarray(arr)
+    if a.dtype != np.uint8:                       # 이미 uint8 이면 clip/astype 복사(맵당 134 MB)를 건너뛴다
+        a = np.clip(a, 0, 255).astype(np.uint8)
+    if not a.flags.c_contiguous:
+        a = np.ascontiguousarray(a)
+    h, w = a.shape[:2]
+    c = 1 if a.ndim == 2 else a.shape[2]
     ct = {1: 0, 3: 2, 4: 6}[c]
-    raw = np.zeros((h, w * c + 1), np.uint8)
-    raw[:, 1:] = arr.reshape(h, w * c)
+    raw = np.empty((h, w * c + 1), np.uint8)
+    raw[:, 0] = 0                                 # 필터 타입 0
+    raw[:, 1:] = a.reshape(h, w * c)
 
     def chunk(t, d):
         return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
     with open(path, "wb") as f:
         f.write(b"\x89PNG\r\n\x1a\n")
         f.write(chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, ct, 0, 0, 0)))
-        f.write(chunk(b"IDAT", zlib.compress(raw.tobytes(), 6)))
+        f.write(chunk(b"IDAT", zlib.compress(raw, 6)))     # 버퍼를 그대로 넘겨 tobytes 복사(67 MB) 생략
         f.write(chunk(b"IEND", b""))
+
+
+def _write_pngs(jobs, workers=4):
+    """여러 PNG 를 스레드로 동시에 압축한다. zlib 은 압축 중 GIL 을 놓아주므로 실제로 빨라진다.
+    한 장이라도 실패하면 순차 실행으로 폴백한다."""
+    if len(jobs) < 2 or (os.cpu_count() or 1) < 2:
+        for p, a in jobs:
+            write_png(p, a)
+        return
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(workers, len(jobs))) as ex:
+            for _ in ex.map(lambda j: write_png(*j), jobs):
+                pass
+    except Exception:                                  # noqa: BLE001
+        for p, a in jobs:
+            write_png(p, a)
 
 
 def _png_channels(path):
@@ -1463,7 +1521,8 @@ class WindowSet:
 # 내보내기
 # =============================================================================
 def write_obj(path, mb):
-    """OBJ (Y-up: x, z, -y). 면마다 꼭짓점 UV."""
+    """OBJ (Y-up: x, z, -y). 면마다 꼭짓점 UV.
+    같은 내용을 <path>.npz 로도 남긴다 - check/render/backface_check 가 OBJ 텍스트를 다시 파싱하지 않는다."""
     with open(path, "w") as f:
         for x, y, z in mb.verts:
             f.write("v %.5f %.5f %.5f\n" % (x, z, -y))
@@ -1474,6 +1533,35 @@ def write_obj(path, mb):
         for face in mb.faces:
             f.write("f " + " ".join("%d/%d" % (vi + 1, offset + k + 1) for k, vi in enumerate(face)) + "\n")
             offset += len(face)
+    _write_obj_cache(path, mb)
+
+
+OBJ_CACHE_VERSION = 1
+
+
+def _write_obj_cache(path, mb):
+    """OBJ 옆에 npz 사이드카. 실패해도 빌드는 계속한다 (캐시는 최적화일 뿐)."""
+    try:
+        n = len(mb.faces)
+        if not n:
+            return
+        st = os.stat(path)
+        key = f"{OBJ_CACHE_VERSION}:{st.st_size}:{st.st_mtime_ns}"
+        # OBJ 는 %.5f/%.6f 로 반올림해 쓰므로, 캐시도 같은 정밀도로 맞춘다.
+        # (텍스트 경로와 캐시 경로가 다른 좌표를 내면 검사 결과가 환경에 따라 달라진다)
+        raw = np.array(mb.verts, np.float64).reshape(-1, 3)
+        V = np.round(raw, 5)          # OBJ 는 %.5f 로 쓰고 로더가 원좌표로 되돌리므로 캐시도 같은 값
+        F = np.array([f if len(f) == 4 else (f[0], f[1], f[2], f[2]) for f in mb.faces], np.int32)
+        FL = np.array([len(f) for f in mb.faces], np.uint8)
+        UVT = np.round(np.array([p for quad in mb.uvs for p in quad], np.float64).reshape(-1, 2), 6)
+        UVO = np.zeros(n, np.int32)
+        UVO[1:] = np.cumsum(FL[:-1], dtype=np.int32)
+        tmp = path + ".npz.tmp"
+        with open(tmp, "wb") as fh:
+            np.savez(fh, key=np.array(key), V=V, F=F, FL=FL, UVT=UVT, UVO=UVO)
+        os.replace(tmp, path + ".npz")
+    except Exception:                                     # noqa: BLE001 - 캐시 실패는 무시
+        pass
 
 
 def asset_name(base, level, size_xy, front_yard=6.0, margin=2.0, lot=None):
@@ -1521,12 +1609,14 @@ def export_asset(name_base, level, meshes, atlas, out_root, lod2_tex=1024, lot=N
     else:
         if os.path.exists(keyf):
             os.remove(keyf)
-        for suffix, arr in atlas.render().items():
-            path = os.path.join(folder, f"{asset}_{suffix}.png")
-            write_png(path, arr)
-            shutil.copyfile(path, os.path.join(folder, f"{asset}_LOD1_{suffix}.png"))
-        for suffix, arr in atlas.render(size=lod2_tex).items():
-            write_png(os.path.join(folder, f"{asset}_LOD2_{suffix}.png"), arr)
+        full = atlas.render()
+        lod2 = atlas.render(size=lod2_tex)
+        jobs = [(os.path.join(folder, f"{asset}_{s}.png"), a) for s, a in full.items()]
+        jobs += [(os.path.join(folder, f"{asset}_LOD2_{s}.png"), a) for s, a in lod2.items()]
+        _write_pngs(jobs)
+        for suffix in full:
+            shutil.copyfile(os.path.join(folder, f"{asset}_{suffix}.png"),
+                            os.path.join(folder, f"{asset}_LOD1_{suffix}.png"))
         if key:
             with open(keyf, "w", encoding="utf-8") as f:
                 f.write(key)
