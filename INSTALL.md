@@ -33,7 +33,8 @@
 
    `run_blender.py` prefers the bpy module (same exporter, headless); set `RUN_BLENDER_ENGINE=exe` to force Blender.
    Without either it still writes OBJ (`--obj`), which covers checks and previews; FBX and the LOD check need one of them.
-   `tools/qa/lod_check.py` looks for the same bpy interpreter, so `--mode final` runs without a Blender install.
+   `tools/qa/lod_check.py` uses the same bpy interpreter, so `--mode final` runs without a Blender install;
+   when both exist it prefers the Blender app for LOD (its Workbench renders are much faster) — set `LOD_ENGINE=exe|py` to force one.
 
 5. Create a project and add photos/TASK values:
 
