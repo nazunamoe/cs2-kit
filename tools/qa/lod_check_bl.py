@@ -37,6 +37,11 @@ sc.render.film_transparent = False
 sc.render.resolution_x = sc.render.resolution_y = res
 sc.render.image_settings.file_format = "PNG"
 sc.render.image_settings.color_mode = "BW"
+# 마스크는 >0.5 이진 판정이라 AA 가 경계만 흐리고 느리다 (512² 132 ms -> 28 ms).
+# 컴포지터/시퀀서도 마스크 렌더에는 필요 없다.
+sc.display.render_aa = "OFF"
+sc.render.use_compositing = False
+sc.render.use_sequencer = False
 
 pts = [o.matrix_world @ Vector(c) for o in groups["main"] for c in o.bound_box]
 lo = Vector((min(p.x for p in pts), min(p.y for p in pts), min(p.z for p in pts)))
@@ -65,6 +70,9 @@ sc.collection.objects.link(cam)
 sc.camera = cam
 
 
+_PX = np.empty(res * res * 4, np.float32)      # 재사용 버퍼 (pixels[:] 는 67 ms, foreach_get 은 0.8 ms)
+
+
 def render_mask(objs, path, cull=True):
     sh.show_backface_culling = cull
     for o in meshes:
@@ -73,7 +81,8 @@ def render_mask(objs, path, cull=True):
     sc.render.filepath = path
     bpy.ops.render.render(write_still=True)
     img = bpy.data.images.load(path, check_existing=False)
-    px = np.array(img.pixels[:], dtype=np.float32).reshape(res, res, 4)[::-1, :, 0]
+    img.pixels.foreach_get(_PX)
+    px = _PX.reshape(res, res, 4)[::-1, :, 0]
     bpy.data.images.remove(img)
     return px > 0.5
 
