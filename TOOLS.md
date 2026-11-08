@@ -138,4 +138,4 @@ V1 limitations: piloti depth is simplified; facade_read/band_scan need real-phot
 
 ## Known limits
 
-The preview renderer is orthographic with simple lighting, not the game renderer. Window blocking samples three points per window. Photo and tile metrics are vulnerable to occlusion, shadows, and weak patterns. FBX needs Blender or the `bpy` module; the LOD check still runs in Blender. Always check game scale, appearance, night lights, alpha, entrance, and registration in game.
+The preview renderer is orthographic with simple lighting, not the game renderer. Window blocking samples three points per window. Photo and tile metrics are vulnerable to occlusion, shadows, and weak patterns. FBX and the LOD check work with either Blender or the `bpy` module. Always check game scale, appearance, night lights, alpha, entrance, and registration in game.

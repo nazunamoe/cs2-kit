@@ -2,6 +2,7 @@
 (앞면이 빠졌거나 뒤집힌 곳 = 게임에서 "투명해 보이는" 곳)을 여러 각도에서 잰다. LOD 는 메인도 막혀 있는 자리만 센다.
 
 검증 도구(tools/qa/). cycle.py 다음에, 보고 전에 매번 돌린다.
+Blender 앱 없이 `bpy` 모듈로도 돈다(tools/blender_py.txt 또는 .venv-bpy 를 찾음).
   python tools/qa/lod_check.py output/<asset>                # 활성 프로젝트 기준 경로
   python tools/qa/lod_check.py output/<asset> --az 16 --elev -10,5,25,50 --res 512
   python tools/qa/lod_check.py --self-test                  # closed cube PASS + open-front cube FAIL baseline
@@ -17,6 +18,30 @@ import argparse, json, os, subprocess, sys, glob
 KIT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tools/qa/ -> 키트 루트
 LIMIT = 0.05
 MARGIN = 0.03
+_BPY = []                                   # [경로] 또는 [None] - 한 번만 탐색
+
+
+def bpy_python():
+    """bpy 모듈이 설치된 Python. 없으면 None. (Blender 앱 없이 LOD 검사)"""
+    if _BPY:
+        return _BPY[0]
+    cands = []
+    if os.environ.get("BLENDER_PY"):
+        cands.append(os.environ["BLENDER_PY"].strip().strip('"'))
+    p = os.path.join(KIT, "tools", "blender_py.txt")
+    if os.path.exists(p):
+        cands.append(open(p, encoding="utf-8").read().strip().strip('"'))
+    cands += [os.path.join(KIT, ".venv-bpy", "Scripts", "python.exe"),
+              os.path.join(KIT, ".venv-bpy", "bin", "python")]
+    found = None
+    for c in cands:
+        if c and os.path.isfile(c):
+            r = subprocess.run([c, "-c", "import bpy"], capture_output=True)
+            if r.returncode == 0:
+                found = c
+                break
+    _BPY.append(found)
+    return found
 
 
 def blender_exe():
@@ -26,6 +51,15 @@ def blender_exe():
     if os.path.exists(p):
         return open(p, encoding="utf-8").read().strip()
     return "blender"
+
+
+def run_bl(py_file, args, blend=None):
+    """lod_check_bl.py / 기준 생성 스크립트를 bpy 모듈 또는 Blender 앱으로 실행."""
+    py = bpy_python()
+    if py:
+        return subprocess.run([py, py_file, "--"] + args, capture_output=True, text=True)
+    cmd = [blender_exe(), "-b"] + ([blend] if blend else []) + ["--python-exit-code", "1", "-P", py_file, "--"] + args
+    return subprocess.run(cmd, capture_output=True, text=True)
 
 
 def active_project():
@@ -63,8 +97,7 @@ for name, missing in (("BaselineClosed", False), ("BaselineOpen", True)):
 '''
     with open(maker, "w", encoding="utf-8") as f:
         f.write(source)
-    made = subprocess.run([blender_exe(), "-b", "--python-exit-code", "1", "-P", maker, "--", work],
-                          capture_output=True, text=True)
+    made = run_bl(maker, [work])
     if made.returncode:
         print(made.stdout[-2000:], made.stderr[-2000:])
         print("LODBASELINE FAIL: could not create baseline assets")
@@ -111,15 +144,14 @@ def main():
     os.makedirs(out, exist_ok=True)
     for f in glob.glob(os.path.join(out, "*.png")):
         os.remove(f)
-    cmd = [blender_exe(), "-b", path, "-P", os.path.join(KIT, "tools", "qa", "lod_check_bl.py"), "--",
-           out, str(a.res), str(a.az), a.elev]
-    for _ in range(2):                                 # once more on a one-off Blender failure (file still being written)
-        r = subprocess.run(cmd, capture_output=True, text=True)
+    bl = os.path.join(KIT, "tools", "qa", "lod_check_bl.py")
+    for _ in range(2):                                 # once more on a one-off failure (file still being written)
+        r = run_bl(bl, [path, out, str(a.res), str(a.az), a.elev], blend=path)
         if "LODCHECK_DONE" in r.stdout:
             break
     if "LODCHECK_DONE" not in r.stdout:
         print(r.stdout[-2000:], r.stderr[-2000:])
-        sys.exit("[lod_check] Blender run failed")
+        sys.exit("[lod_check] Blender/bpy run failed")
     rows = json.load(open(os.path.join(out, "lod_check.json"), encoding="utf-8"))["rows"]
     man = os.path.join(os.path.dirname(path), "manifest.json")
     shift = (0.0, 0.0)

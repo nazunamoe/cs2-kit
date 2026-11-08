@@ -15,7 +15,7 @@
 1. Extract the kit into a writable folder.
 2. Install Python 3.9+ and run `pip install numpy pillow`.
 3. Run `python tools/project.py init`.
-4. FBX export needs Blender **or** the `bpy` Python module. The module needs no app install:
+4. FBX export and the LOD check need Blender **or** the `bpy` Python module. The module needs no app install:
    its wheels track one Python version (Blender 5.0 → 3.11, 5.1 → 3.13), so use a dedicated venv.
 
    ```bash
@@ -32,7 +32,8 @@
    ```
 
    `run_blender.py` prefers the bpy module (same exporter, headless); set `RUN_BLENDER_ENGINE=exe` to force Blender.
-   Without either it still writes OBJ (`--obj`), which covers checks, previews and LOD checks.
+   Without either it still writes OBJ (`--obj`), which covers checks and previews; FBX and the LOD check need one of them.
+   `tools/qa/lod_check.py` looks for the same bpy interpreter, so `--mode final` runs without a Blender install.
 
 5. Create a project and add photos/TASK values:
 

@@ -8,7 +8,7 @@
 
 - Python 3.9 이상
 - `numpy`, `Pillow`
-- Blender 5.2 — FBX 생성과 최종 LOD 검사 / 또는 `bpy` pip 모듈 — FBX 생성만 (앱 설치 불필요)
+- Blender 5.2 또는 `bpy` pip 모듈 — FBX 생성과 LOD 검사에 필요 (bpy는 앱 설치 없이 동작)
 - OpenCode와 사용할 모델 제공자 계정 — 설치는 [OpenCode 문서](https://opencode.ai/docs/) 참조
 
 키트 루트에서 설치와 초기 설정을 실행합니다.
