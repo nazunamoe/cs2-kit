@@ -1696,6 +1696,39 @@ def _bl_object(mb, name, coll, mat=None):
     return ob
 
 
+def _bl_ensure_fbx():
+    """bpy 모듈(pip)에서는 FBX 내보내기 애드온이 기본 비활성일 수 있다."""
+    try:
+        if "io_scene_fbx" in bpy.context.preferences.addons:
+            return
+        bpy.ops.preferences.addon_enable(module="io_scene_fbx")
+    except Exception:                                   # noqa: BLE001 - 앱 모드에서는 이미 켜져 있음
+        pass
+
+
+FBX_KW = dict(use_selection=True, object_types={"MESH"}, apply_unit_scale=True, apply_scale_options=FBX_SCALE_OPTION,
+              axis_forward="-Z", axis_up="Y", bake_space_transform=True, mesh_smooth_type="FACE",
+              add_leaf_bones=False, bake_anim=False, path_mode="STRIP", embed_textures=False)
+
+
+def _bl_fbx(filepath):
+    """파트 FBX 한 개 쓰기. Blender 5.x 에는 C++ exporter(wm.fbx_export)만 있을 수 있다."""
+    _bl_ensure_fbx()
+    try:
+        bpy.ops.export_scene.fbx(filepath=filepath, **FBX_KW)
+        return
+    except Exception as e:                              # noqa: BLE001
+        old_err = e
+    alt = dict(export_selected_objects=True, apply_unit_scale=True, bake_space_transform=True,
+               mesh_smooth_type="FACE", add_leaf_bones=False, bake_anim=False, path_mode="STRIP",
+               embed_textures=False, forward_axis="NEGATIVE_Z", up_axis="Y")
+    props = {p.identifier for p in bpy.ops.wm.fbx_export.get_rna_type().properties}
+    try:
+        bpy.ops.wm.fbx_export(filepath=filepath, **{k: v for k, v in alt.items() if k in props})
+    except Exception:
+        raise old_err
+
+
 def _bl_export(asset, folder, parts):
     names = [asset + SUFFIX[k] for k in PARTS]
     for n in names:

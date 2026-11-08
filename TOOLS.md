@@ -98,18 +98,19 @@ python tools/extract_texture.py photos/front.jpg --pts 812,402,1290,380,1302,905
 
 Scans are measurement references. Never copy their geometry or textures into the asset.
 
-## Scoped comparison and Blender
+## Scoped comparison and FBX (Blender or bpy)
 
 ```bash
 python tools/compare.py snap output/A
 python tools/compare.py diff backup/SNAPSHOT output/A --box=-11,11,-8,0,0,6
 python tools/run_blender.py --find
 python tools/run_blender.py --set "C:\path\to\blender.exe"
+python tools/run_blender.py --set-py ".venv-bpy\Scripts\python.exe"
 python tools/run_blender.py --obj G -- --out output
 python tools/run_blender.py G -- --out output
 ```
 
-`--obj` skips Blender for fast iteration. Without `--obj`, Blender is used when found. `compare.py diff --box` fails on mesh changes outside the box; window UVs are compared by position because atlas allocation can reorder them.
+`--obj` skips FBX for fast iteration. Without `--obj`, the bpy module is used when found, otherwise Blender; `RUN_BLENDER_ENGINE=exe` forces the app. `pip install bpy` in a matching venv (Blender 5.0 → Python 3.11) writes the same FBX headlessly, with no Blender install; `tools/run_blender.py --fbx2obj` can also read FBX back without Blender. `compare.py diff --box` fails on mesh changes outside the box; window UVs are compared by position because atlas allocation can reorder them.
 
 ## Preset/socket mode (v1, optional)
 
@@ -137,4 +138,4 @@ V1 limitations: piloti depth is simplified; facade_read/band_scan need real-phot
 
 ## Known limits
 
-The preview renderer is orthographic with simple lighting, not the game renderer. Window blocking samples three points per window. Photo and tile metrics are vulnerable to occlusion, shadows, and weak patterns. FBX and LOD require Blender. Always check game scale, appearance, night lights, alpha, entrance, and registration in game.
+The preview renderer is orthographic with simple lighting, not the game renderer. Window blocking samples three points per window. Photo and tile metrics are vulnerable to occlusion, shadows, and weak patterns. FBX needs Blender or the `bpy` module; the LOD check still runs in Blender. Always check game scale, appearance, night lights, alpha, entrance, and registration in game.
