@@ -73,11 +73,11 @@ sc.camera = cam
 _PX = np.empty(res * res * 4, np.float32)      # 재사용 버퍼 (pixels[:] 는 67 ms, foreach_get 은 0.8 ms)
 
 
-def render_mask(objs, path, cull=True):
+def render_mask(objs, path, cull=True, ground_vis=True):
     sh.show_backface_culling = cull
     for o in meshes:
         o.hide_render = o not in objs
-    ground.hide_render = False
+    ground.hide_render = not ground_vis          # 올려다보는 시점에서만 바닥이 필요하다 (필레이트 절약)
     sc.render.filepath = path
     bpy.ops.render.render(write_still=True)
     img = bpy.data.images.load(path, check_existing=False)
@@ -119,6 +119,7 @@ def locate(objs, hole, d, n=4):
 rows = []
 tmp = os.path.join(out_dir, "_tmp.png")
 for el in elevs:
+    gvis = el < 0                                        # 내려다보는 시점에는 바닥이 화면만 채운다
     for k in range(n_az):
         az = 360.0 * k / n_az
         d = Vector((math.sin(math.radians(az)) * math.cos(math.radians(el)),
@@ -126,7 +127,7 @@ for el in elevs:
                     math.sin(math.radians(el))))
         cam.location = ctr + d * size * 3
         cam.rotation_euler = (-d).to_track_quat("-Z", "Y").to_euler()
-        masks = {g: render_mask(objs, tmp) for g, objs in groups.items()}
+        masks = {g: render_mask(objs, tmp, ground_vis=gvis) for g, objs in groups.items()}
         ref = masks["main"]
         n_ref = max(int(ref.sum()), 1)
         for g in ("lod1", "lod2", "main"):
@@ -134,7 +135,7 @@ for el in elevs:
                 continue
             # 투명 = 앞면이 없어서 건물 안쪽의 뒷면이 비치는 곳: 뒷면을 그리면 막히고(cull off) 안 그리면 뚫림(cull on).
             # (LOD 가 일부러 뺀 크라운 틀 같은 단순화는 뒤에 아무것도 없으니 세지 않는다)
-            back = render_mask(groups[g], tmp, cull=False)
+            back = render_mask(groups[g], tmp, cull=False, ground_vis=gvis)
             hole = back & ~masks[g]
             if g != "main":
                 hole &= ref                                   # 메인도 막혀 있는 자리만
