@@ -62,7 +62,8 @@ window:
   front_sill_m: 0.82
   night_color: [255, 255, 255]
   night_lit_ratio: 0.32
-  night_patch_grid: 5  # must match cs2kit.WindowSet REF_GRID (household cells)
+  # night_patch_grid must match cs2kit.WindowSet REF_GRID (household cells)
+  night_patch_grid: 5
 
 layers:
   band_height_m: 0.18
