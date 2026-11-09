@@ -251,6 +251,14 @@ python tools/agent.py review --project my-apt --status PASS --note "reviewed fin
 
 사진 검사가 있으면 photo sheet도 `--artifact`로 지정합니다. 일부만 본 `PARTIAL`은 PASS가 아니며, 이미지를 볼 수 없으면 `NEEDS_HUMAN_REVIEW`를 사용합니다.
 
+LOD 후보가 필요하면 main `.blend`에서 LOD1/LOD2를 만들고 빠른 구멍 검사를 실행합니다.
+
+```bash
+python tools/lod_auto.py --project my-apt --asset output/<asset> --check --json
+```
+
+`--check`는 16시점 quick 검사입니다. 보고 전에는 `--check-full` 또는 `tools/qa/lod_check.py` 전체 검사를 사용하세요. 자세한 내용은 [LOD 자동 후보](docs/agent/LOD_AUTO.md)를 참고하세요.
+
 Stop 훅은 final/fix 단계에서 PASS가 아닌 채 종료하면 저장된 다음 행동을 알려 줍니다. 실패 원인은 그대로 보고해야 합니다.
 
 ## 5. 사진, 결과, 재개
@@ -305,6 +313,7 @@ python tools/agent.py fix --project my-apt --generator my_apt_cs2.py --finish --
 - [360 사진 원근 크롭](docs/agent/PANORAMA_360.md)
 - [영상 프레임 추출](docs/agent/VIDEO_FRAMES.md)
 - [사진 품질 게이트](docs/agent/PHOTO_QUALITY.md)
+- [LOD 자동 후보](docs/agent/LOD_AUTO.md)
 - [IFC에서 GLB로](docs/agent/IFC_TO_GLB.md)
 - [네이버 VR 메타데이터 매스](docs/agent/XRX_MASS.md)
 - [상가·학교·비정형 볼륨](docs/agent/VOLUMES.md)
