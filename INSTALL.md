@@ -53,7 +53,7 @@ Check the environment at any time:
 python tools/agent.py doctor --project my-apt --json
 ```
 
-Optional Naver VR capture also needs `pip install playwright` and Chrome running with remote debugging port 9222. See `docs/agent/NAVER_VR.md`; Blender is not used for VR capture or `make_refs`.
+Optional Naver VR capture also needs `pip install playwright`. `capture/naver_vr.py auto` starts Chrome with remote debugging itself; `run`/`batch` still need a Chrome window on port 9222. See `docs/agent/NAVER_VR.md`; Blender is not used for VR capture or `make_refs`.
 
 ## Upgrade
 

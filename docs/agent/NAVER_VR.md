@@ -1,6 +1,29 @@
 # Naver VR capture and paint-accurate photo refs
 
-Use `capture/naver_vr.py` when a Naver complex tour provides repeatable building views and `data.xrx` geometry/camera metadata. It requires Chrome with remote debugging and Playwright; it is separate from the normal project photo workflow.
+Use `capture/naver_vr.py` when a Naver complex tour provides repeatable building views and `data.xrx` geometry/camera metadata. It requires Playwright. `auto` starts Chrome with remote debugging itself; the older `run`/`batch` commands still expect a Chrome window opened by hand. It is separate from the normal project photo workflow.
+
+## One-command URL flow (`auto`)
+
+```bash
+python capture/naver_vr.py auto \
+  --url https://fin.land.naver.com/complexes/125062/tour \
+  --project namsan_xihanulche \
+  --dongs 101,107 --fit-wall --angles 4 --make-refs --dry-run
+```
+
+Remove `--dry-run` to capture. The command:
+
+1. accepts only `land.naver.com` tour URLs and rejects a page whose `data.xrx` id differs from the URL;
+2. reuses port 9222 or launches Chrome with a dedicated profile (`capture/.chrome-vr`) at `--window-size 2400,1800` (larger canvas = more ref pixels);
+3. creates `projects/<name>` with `project.py new` when missing; an existing project's TASK/generator is not touched;
+4. writes captures straight into `projects/<name>/photos` (no second copy of the images);
+5. refuses to overwrite existing captures unless `--overwrite`; partial captures from this tool resume;
+6. `--make-refs` merges one best planar view per exact plane into `<project>/photo_refs.json` and writes `photos/refs_check/`;
+7. writes TASK: a new project gets `TASK.md`; an existing project gets `TASK.auto.md` only. `--task write` forces the write with `TASK.md.bak`.
+
+TASK fields are filled only while empty or still holding the template placeholder: `building`, `photos`, `complex_name`, `floors` (highest selected dong), `known_facts`, `blender_path`. `name`, `region`, `built_year` are filled only when `--asset-name`, `--region`, `--built-year` are passed. `glb`, `refuge_floor`, `size_m`, `louver`, `railing`, `balcony`, `curtainwall`, `window_type` stay for the human because the tour data does not prove them.
+
+Useful options: `--refs-min-px 200` (lower accepts narrower planes), `--on-blocked ask` (wait for a popup/login), `--close-chrome` (close only the Chrome that `auto` started). If the facade count is low, inspect `photos/refs_check/`; a larger `--window-size` or `--angles 8` adds pixels/directions.
 
 ## What the capture command does
 
@@ -22,7 +45,7 @@ python capture/naver_vr.py run --dongs 101,103 --fit-wall --angles 4
 python capture/naver_vr.py batch urls.txt --file urls.txt
 ```
 
-A Chrome instance must already run with remote debugging port 9222 and the Naver tour open. See the header of `capture/naver_vr.py` for its exact command.
+`run`/`batch` need a Chrome instance already running with remote debugging port 9222 and the Naver tour open. `auto` starts that Chrome itself. See the header of `capture/naver_vr.py` for the manual command.
 
 ## Performance and resume
 
