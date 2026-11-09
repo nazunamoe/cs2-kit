@@ -115,22 +115,38 @@ def louver_candidates(wall, fl, cols, min_lines=5):
         return []
     win = max(3, int(round(0.45 * ppm)))
     step = max(1, int(round(0.08 * ppm)))
+    # prefix sum over x: every strip's per-row energy is then two lookups, so the whole
+    # profile for all strips costs O(H * W) instead of O(strips * win * floors * rows)
+    csx = np.cumsum(g, axis=1, dtype=np.float64)
+    csx = np.hstack([np.zeros((csx.shape[0], 1), dtype=np.float64), csx])  # (H, W+1)
+    centres = np.array([c for c, _ in fl["centres"]], dtype=float)
+    r0 = np.clip((centres - pitch_px / 2).astype(int), 0, g.shape[0])
+    r1 = np.clip((centres + pitch_px / 2).astype(int), 1, g.shape[0])
+    valid = (r1 - r0) >= 5
+    if valid.sum() < 4:
+        return []
+    # per-row mean energy for a strip = (row_sum(x1) - row_sum(x0)) / win, for every row
+    # vectorized over rows: (H, W+1) prefix sums give it directly
+    r0v, r1v = r0[valid], r1[valid]
+    nfl = len(r0v)
+
+    def strip_counts(x0, x1):
+        x1c = min(x1, W)
+        row_e = (csx[:, x1c] - csx[:, x0]) / max(x1c - x0, 1) if x1c > x0 else np.zeros(csx.shape[0])
+        counts = np.empty(nfl, dtype=np.int64)
+        for i in range(nfl):
+            a0, a1 = r0v[i], r1v[i]
+            e = row_e[a0:a1]
+            thr = max(6.0, 2.0 * float(np.median(e)))
+            counts[i] = int((e > thr).sum())
+        return counts
+
     strips = []
     for x0 in range(0, max(1, W - win + 1), step):
         x1 = min(W, x0 + win)
-        seg = g[:, x0:x1]
-        counts = []
-        for c, _ in fl["centres"]:
-            r0 = int(max(0, c - pitch_px / 2))
-            r1 = int(min(g.shape[0], c + pitch_px / 2))
-            if r1 - r0 < 5:
-                continue
-            e = seg[r0:r1].mean(axis=1)
-            thr = max(6.0, 2.0 * float(np.median(e)))
-            counts.append(int((e > thr).sum()))
-        if len(counts) < 4:
-            continue
-        strips.append((x0, x1, float(np.median(counts)), float(np.percentile(counts, 75)), len(counts)))
+        counts = strip_counts(x0, x1)
+        strips.append((x0, x1, float(np.median(counts)), float(np.percentile(counts, 75)), nfl))
+
     hot = [s for s in strips if s[2] >= min_lines]
     if not hot:
         return []

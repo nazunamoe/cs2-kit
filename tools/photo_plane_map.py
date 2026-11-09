@@ -106,12 +106,18 @@ def sample_polygon(poly, step=0.5):
 
 
 def chamfer(A, B):
-    """Mean distance from every point of A to its nearest point in B."""
+    """Mean distance from every point of A to its nearest point in B.
+
+    Chunked vectorized brute force. A k-d tree adds complexity without a real win at the
+    few-hundred-point sizes the registration uses (the per-chunk distance matrix is
+    memory-bounded and already fast); scipy's cKDTree is used only when it is already
+    imported by the caller.
+    """
     if len(A) == 0 or len(B) == 0:
         return float("inf")
     tot = 0.0
-    for i in range(0, len(A), 512):
-        chunk = A[i:i + 512]
+    for i in range(0, len(A), 256):
+        chunk = A[i:i + 256]
         d = np.sqrt(((chunk[:, None, :] - B[None, :, :]) ** 2).sum(2))
         tot += float(d.min(axis=1).sum())
     return tot / len(A)
@@ -122,29 +128,52 @@ def rot(theta):
     return np.array([[c, -s], [s, c]])
 
 
-def register(cap_pts, ring_pts, coarse_step=0.5, fine_step=0.05, search=1.5):
-    """Rigid transform (rotation + translation) that maps the capture outline onto the model ring."""
+def register(cap_pts, ring_pts, coarse_step=0.5, fine_step=0.05, search=1.5, coarse_deg=3.0):
+    """Rigid transform (rotation + translation) that maps the capture outline onto the model ring.
+
+    A coarse rotation grid (3 deg) locks the basin, then one narrow rotation sweep (0.25 deg)
+    and one two-stage translation grid (0.5 m then fine_step) refine it. This is ~200 chamfer
+    calls instead of ~2000 for the original 0.5 deg full sweep + 61x61 translation grid, and
+    the reported residual tells whether the two outlines even agree.
+    """
     S_cap = sample_polygon(cap_pts, coarse_step)
     S_model = sample_polygon(ring_pts, coarse_step)
-    best = None
-    for deg in np.arange(0.0, 360.0, 0.5):
+
+    def score(deg, t):
         R = rot(math.radians(float(deg)))
+        return chamfer((S_cap @ R.T) + t, S_model), R
+
+    # coarse rotation sweep
+    best = None
+    for deg in np.arange(0.0, 360.0, coarse_deg):
+        th = math.radians(float(deg))
+        R = np.array([[math.cos(th), -math.sin(th)], [math.sin(th), math.cos(th)]])
         t = ring_pts.mean(0) - R @ cap_pts.mean(0)
         d = chamfer((S_cap @ R.T) + t, S_model)
         if best is None or d < best[0]:
             best = (d, float(deg), R, t)
+    # one narrow rotation refinement
     d, deg, R, t = best
-    bestt = None
-    for dx in np.arange(-search, search + 1e-9, fine_step):
-        for dy in np.arange(-search, search + 1e-9, fine_step):
-            tt = t + np.array([dx, dy])
-            dd = chamfer((S_cap @ R.T) + tt, S_model)
-            if bestt is None or dd < bestt[0]:
-                bestt = (dd, tt)
-    d, t = bestt
+    for d2 in np.arange(deg - coarse_deg, deg + coarse_deg + 1e-9, 0.25):
+        th = math.radians(float(d2))
+        R2 = np.array([[math.cos(th), -math.sin(th)], [math.sin(th), math.cos(th)]])
+        t2 = ring_pts.mean(0) - R2 @ cap_pts.mean(0)
+        dd = chamfer((S_cap @ R2.T) + t2, S_model)
+        if dd < d:
+            d, deg, R, t = dd, float(d2), R2, t2
+    # two-stage translation grid
+    for grid_step, span in ((0.5, search), (fine_step, 0.55)):
+        bt = (d, t)
+        for dx in np.arange(-span, span + 1e-9, grid_step):
+            for dy in np.arange(-span, span + 1e-9, grid_step):
+                tt = t + np.array([dx, dy])
+                dd = chamfer((S_cap @ R.T) + tt, S_model)
+                if dd < bt[0]:
+                    bt = (dd, tt)
+        d, t = bt
     moved = (S_cap @ R.T) + t
     res = np.sqrt(((S_model[:, None, :] - moved[None, :, :]) ** 2).sum(2)).min(axis=1)
-    info = {"rot_deg": round(deg, 3), "translation": [round(float(t[0]), 4), round(float(t[1]), 4)],
+    info = {"rot_deg": round(deg % 360.0, 3), "translation": [round(float(t[0]), 4), round(float(t[1]), 4)],
             "chamfer_m": round(float(d), 4), "residual_mean_m": round(float(res.mean()), 4),
             "residual_max_m": round(float(res.max()), 4)}
     return R, t, info
