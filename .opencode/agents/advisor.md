@@ -1,7 +1,7 @@
 ---
 description: Read-only strategic advisor. Consult before committing to an approach, when stuck, or before declaring a complex task done.
 mode: subagent
-model: ollama-cloud/deepseek-v4-pro:0813#high
+model: ollama-cloud/minimax-m3.1-flash#high
 permissions:
   - action: edit
     resource: "*"

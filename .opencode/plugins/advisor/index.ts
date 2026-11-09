@@ -13,7 +13,7 @@ import { Plugin } from "@opencode/plugin"
  *                                         "id": "kimi-k3.1-pro" } } }]
  */
 
-const MODEL = { providerID: "ollama-cloud", id: "deepseek-v4-pro:0813" }
+const MODEL = { providerID: "ollama-cloud", id: "minimax-m3.1-flash" }
 const MAX_TRANSCRIPT_CHARS = 120_000
 
 type AnyMessage = {
