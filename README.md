@@ -124,7 +124,7 @@ python tools/agent.py review --project my-apt --status PASS --note "reviewed fin
 
 사진 검사가 있으면 photo sheet도 `--artifact`로 지정합니다. 일부만 본 `PARTIAL`은 PASS가 아니며, 이미지를 볼 수 없는 모델은 `NEEDS_HUMAN_REVIEW`를 사용합니다.
 
-이 브랜치에는 Claude Stop 훅이 없으므로, 외부 실행기 또는 에이전트가 완료 전에 최종 상태를 확인합니다.
+이 브랜치에는 자동 종료 훅이 없으므로, 외부 실행기 또는 에이전트가 완료 전에 최종 상태를 확인합니다.
 
 ```bash
 python tools/agent.py require-final --project my-apt --json

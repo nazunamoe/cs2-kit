@@ -68,7 +68,7 @@ Inspect the derived image before explicitly sending it to an external API. If im
 
 ## Completion gate
 
-There is no Claude Stop hook in this branch. An external runner or the agent must call:
+There is no automatic stop hook in this branch. An external runner or the agent must call:
 
 ```bash
 python tools/agent.py require-final --project P --json

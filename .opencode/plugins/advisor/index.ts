@@ -1,7 +1,7 @@
 import { Plugin } from "@opencode/plugin"
 
 /**
- * Advisor tool (Claude Code `/advisor`-style pattern).
+ * Advisor tool: the executor consults a stronger, read-only model at decision points.
  *
  * The executor model calls `advisor()` at decision points. The tool forwards
  * the current session transcript to a stronger, read-only model and returns a
