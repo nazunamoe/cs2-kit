@@ -1050,7 +1050,11 @@ def ensure_chrome(url, args):
     CHROME_STATE.mkdir(parents=True, exist_ok=True)
     cmd = [str(exe), "--remote-debugging-port=9222", f"--user-data-dir={profile}",
            "--no-first-run", "--no-default-browser-check", "--disable-popup-blocking",
-           f"--window-size={getattr(args, 'window_size', '2400,1800').replace('x', ',')}", url]
+           f"--window-size={getattr(args, 'window_size', '2400,1800').replace('x', ',')}"]
+    if getattr(args, "headless", False):
+        cmd.append("--headless=new")
+        log("[chrome] WARN headless mode: the VR viewer may render a blank or low-detail canvas; verify the first shot")
+    cmd.append(url)
     log("[chrome] " + " ".join(f'"{c}"' if " " in c else c for c in cmd))
     flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     with open(CHROME_STATE / "chrome.log", "ab") as logf:
@@ -1714,6 +1718,8 @@ def main():
     au.add_argument("--chrome-profile", help="dedicated --user-data-dir")
     au.add_argument("--chrome-wait", type=float, default=25.0, help="seconds to wait for port 9222")
     au.add_argument("--window-size", default="2400,1800", help="Chrome window WxH (bigger = more ref pixels)")
+    au.add_argument("--headless", action="store_true",
+                    help="launch the dedicated Chrome with --headless=new (experimental; verify the first shot)")
     au.add_argument("--refs-min-px", type=float, default=200.0, help="--make-refs: minimum wall width in px")
     au.add_argument("--on-blocked", choices=["fail", "ask"], default="fail")
     au.add_argument("--close-chrome", action="store_true", help="auto 가 띄운 Chrome 만 종료")

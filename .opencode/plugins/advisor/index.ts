@@ -15,6 +15,20 @@ import { Plugin } from "@opencode/plugin"
 
 const MODEL = { providerID: "ollama-cloud", id: "minimax-m3.1-flash" }
 const MAX_TRANSCRIPT_CHARS = 120_000
+const MAX_TURNS = 24
+const CACHE_LIMIT = 8
+
+/** Tiny deterministic hash for the response cache key (no Node crypto import needed). */
+function fnv1a(text: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0).toString(16)
+}
+
+const responseCache = new Map<string, string>()
 
 type AnyMessage = {
   role?: string
@@ -84,9 +98,11 @@ export default Plugin.define({
     const options = (ctx.options ?? {}) as {
       model?: { providerID: string; id: string }
       max_chars?: number
+      max_turns?: number
     }
     const model = options.model ?? MODEL
     const maxChars = Number(options.max_chars ?? MAX_TRANSCRIPT_CHARS)
+    const maxTurns = Math.max(2, Number(options.max_turns ?? MAX_TURNS))
 
     await ctx.tool.transform((editor) => {
       editor.add({
@@ -111,11 +127,19 @@ export default Plugin.define({
             const messages = (await ctx.session.context({
               sessionID: context.sessionID,
             })) as AnyMessage[]
+            const recent = messages.slice(-maxTurns)
             const transcript = truncate(
-              messages.map(renderMessage).filter(Boolean).join("\n\n"),
+              recent.map(renderMessage).filter(Boolean).join("\n\n"),
               maxChars,
             )
             const focus = input?.focus?.trim()
+            const cacheKey = fnv1a(`${model.providerID}/${model.id}|${focus ?? ""}|${transcript}`)
+            const cached = responseCache.get(cacheKey)
+            if (cached) {
+              return {
+                content: `ADVISOR (${model.providerID}/${model.id}, cached):\n\n${cached}`,
+              }
+            }
             const prompt = [
               "You are a senior technical advisor reviewing an executor agent's work.",
               "You cannot edit files or run tools. Give guidance only.",
@@ -135,8 +159,16 @@ export default Plugin.define({
             ].join("\n")
 
             const { text } = await ctx.experimental.generate.text({ model, prompt })
+            const answer = text.trim()
+            if (answer) {
+              responseCache.set(cacheKey, answer)
+              if (responseCache.size > CACHE_LIMIT) {
+                const oldest = responseCache.keys().next().value
+                if (oldest) responseCache.delete(oldest)
+              }
+            }
             return {
-              content: `ADVISOR (${model.providerID}/${model.id}):\n\n${text.trim()}`,
+              content: `ADVISOR (${model.providerID}/${model.id}):\n\n${answer}`,
             }
           } catch (error) {
             const reason = error instanceof Error ? error.message : String(error)
