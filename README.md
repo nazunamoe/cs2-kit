@@ -284,9 +284,12 @@ python tools/agent.py fix --project my-apt --generator my_apt_cs2.py --finish --
 ## 7. 더 보기
 
 - [설치와 업그레이드](INSTALL.md)
+- [문서 지도](docs/README.md)
 - [전체 작업 절차](docs/agent/WORKFLOW.md)
 - [도구와 API](TOOLS_CLAUDE.md)
 - [상세 모델링 지침](docs/agent/MODELING.md)
+- [측정 기반 파사드](docs/agent/FACADE_MEASURED.md)
+- [입면 작업 노하우](docs/agent/FACADE_KNOWHOW.md)
 - [GLB 기반 매스 재구성](docs/agent/GLB_MASS.md)
 - [네이버 VR 캡처와 도색 refs](docs/agent/NAVER_VR.md)
 - [GLB 없는 사진 증거 작업](docs/agent/PHOTO_ONLY.md)

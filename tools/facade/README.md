@@ -28,7 +28,7 @@
 | `scan_photo_cam.py`, `model_photo_cam.py` | **VR 사진과 같은 카메라(pos·fov)로 스캔 / 모델을 렌더**해 사진과 나란히 (사진 = 스캔 렌더 확인됨). 사진 픽셀 → 벽 위치 환산의 기준 |
 | `ktx2png.js` | glb 의 KTX2 텍스처를 PNG 로 (three.js basis_transcoder 필요) |
 
-일부는 옛 프로젝트의 인자 순서·환경변수를 가정한다. 각 파일 머리의 usage 주석을 먼저 읽는다. 정리된 노하우는 `docs/FACADE_KNOWHOW.md`.
+일부는 옛 프로젝트의 인자 순서·환경변수를 가정한다. 각 파일 머리의 usage 주석을 먼저 읽는다. 정리된 노하우는 `docs/agent/FACADE_KNOWHOW.md`.
 
 `rail_edges.py` / `rail_plan.py` / `rail_table.py` 는 생성기 파일 경로를 환경변수 `FACADE_GEN`에서 읽는다(절대 경로로 줄 것. 기본값 `generator_cs2.py` 는 `tools/scan/` 기준이라 대개 맞지 않는다).
 

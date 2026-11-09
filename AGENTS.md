@@ -75,7 +75,7 @@ Use `WindowSet.add_face` for windows. Use atlas UV helpers for custom quads. `ax
 - Full workflow, resume, review, fix: `docs/agent/WORKFLOW.md`
 - Tool commands and preset API: `TOOLS_CLAUDE.md`
 - Detailed facade/photo modeling: `docs/agent/MODELING.md`
-- Existing facade lessons: `docs/FACADE_KNOWHOW.md`
+- Existing facade lessons: `docs/agent/FACADE_KNOWHOW.md`
 - Measured per-face windows/paint and image-crop comparison: `docs/agent/FACADE_MEASURED.md`
 - Photo-only evidence and wall refs: `docs/agent/PHOTO_ONLY.md`
 - Generic volumes and feature schema: `docs/agent/VOLUMES.md`
