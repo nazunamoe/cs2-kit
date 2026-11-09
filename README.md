@@ -84,9 +84,18 @@ python tools/shadow_norm.py --project my-building \
 ```bash
 python tools/photo_plane_map.py --project my-building \
   --meta photos/<dong>_meta.json --mass generic_spec.json --refs photo_refs.json
+python tools/facade_read.py --project my-building --refs photo_refs.json \
+  --plane-map work/plane_to_edge.json --table
+python tools/qa/plane_compare.py --project my-building --asset output/<asset> \
+  --meta photos/<dong>_meta.json --refs photo_refs.json --plane-map work/plane_to_edge.json
 ```
 
-사진 평면마다 **덮는 모델 벽·미터 오프셋·좌우 반전 여부·실제 해상도(px/m)**를 알려줍니다. 해상도가 낮으면(창 폭 측정에 20 px/m 미만) 그 사진으로는 창 폭을 읽을 수 없으니 다시 캡쳐해야 합니다. 자세한 내용은 [사진 평면 → 모델 벽 매핑](docs/agent/PHOTO_PLANE_MAP.md)을 참고하세요.
+- `photo_plane_map`: 사진 평면마다 **덮는 모델 벽·미터 오프셋·좌우 반전·실제 해상도(px/m)**를 알려줍니다.
+- `facade_read`: 평면 사진에서 창 열을 **미터로** 읽고, 루버 밴드를 찾고, 생성기용 표를 씁니다.
+- `plane_compare`: 같은 평면을 사진/모델로 나란히 비교해 입면이 맞는지 봅니다.
+
+해상도가 낮으면(창 폭 측정에 20 px/m 미만) 그 사진으로는 창 폭을 읽을 수 없으니 다시 캡쳐해야 합니다.
+자세한 내용은 [사진 평면 → 모델 벽 매핑](docs/agent/PHOTO_PLANE_MAP.md)을 참고하세요.
 
 ## 3. OpenCode로 실행
 

@@ -121,6 +121,25 @@ python tools/render.py output/<asset> -o previews/full_front.png \
 - raw pixel diff는 조명(햇빛/그늘)이 지배한다. **열 수·위치·폭 판정에는 유효**하지만
   albedo 판정으로 쓰지 않는다. 색 판정에는 조명 정규화가 별도로 필요하다.
 
+### 면 단위 비교 (plane_compare.py)
+
+사진과 모델은 좌표계가 다르므로 사진 전체 실루엣 비교(`tools/qa/cmp_cam.py`)로는
+"그 벽의 입면이 맞는지"를 알 수 없다. `tools/qa/plane_compare.py`는 두 좌표계를 등록한 뒤
+**정확한 캡처 카메라로 모델을 렌더**하고, 같은 평면 직사각형으로 둘 다 펴서 나란히 놓는다.
+
+```bash
+python tools/qa/plane_compare.py --project my-building \
+  --asset output/<asset> --meta photos/<dong>_meta.json --refs photo_refs.json \
+  --plane-map work/plane_to_edge.json --out work/plane_compare
+```
+
+- 결과: `work/plane_compare/<plane>_<shot>.png` = `photo | model` (같은 폭, 같은 스케일)
+- 출력 줄의 `offset`은 사진 안에서 모델 평면이 몇 px 어긋나 있는가다. 값이 크면
+  **등록(photo_plane_map)이나 매스**를 먼저 손봐야 한다.
+- 비교 단위는 **밴드(사진 한 장)**다. 여러 밴드를 이어붙인 평면은 카메라가 한 장이므로
+  밴드 refs로 비교한다(이어붙인 ref에 `source_file`을 지정해 카메라를 잡아줄 수도 있다).
+- `--z0/--z1`로 높이 구간만 뽑아 비교할 수 있다(기본은 ref 자신의 밴드).
+
 ## 5. Per-cell paint
 
 - `band_scan` grid는 **햇빛 받는 평면 ref**에만 albedo로 적용한다. 그늘 ref는 layout만.
