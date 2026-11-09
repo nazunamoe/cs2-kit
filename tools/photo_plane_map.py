@@ -10,7 +10,7 @@ measured on the photo can be placed on the model wall.
     python tools/photo_plane_map.py --meta photos/ref101/101_meta.json \
         --mass generic_spec_xrx.json [--refs photo_refs_stitched2.json] \
         [--volume dong_101] [--min-len 6] [--min-px-per-m 15] \
-        [--out work/plane_to_edge.json] [--json]
+        [--no-cache] [--out work/plane_to_edge.json] [--json]
 
 How it works
     1. the capture footprint (meta["footprint_m"]) is registered onto the model ring with a
@@ -29,6 +29,7 @@ Use it with facade_read.py output (columns in metres) to place measured columns,
 tools/qa/plane_compare.py to compare the model with the photo plane by plane.
 """
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -179,6 +180,67 @@ def register(cap_pts, ring_pts, coarse_step=0.5, fine_step=0.05, search=1.5, coa
     return R, t, info
 
 
+CACHE_VERSION = 1
+CACHE_LIMIT = 16
+
+
+def _cache_key(cap_pts, ring_pts, params):
+    """Digest of both outlines and the search parameters; a changed input is a cache miss."""
+    h = hashlib.sha256()
+    h.update(("v%d|%s" % (CACHE_VERSION, json.dumps(params, sort_keys=True))).encode("utf-8"))
+    for arr in (cap_pts, ring_pts):
+        a = np.ascontiguousarray(arr, dtype="<f8")
+        h.update(("%s|" % (a.shape,)).encode("ascii"))
+        h.update(a.tobytes())
+    return h.hexdigest()
+
+
+def register_cached(cap_pts, ring_pts, cache_path, use_cache=True, **kw):
+    """register() with a deterministic cache; the result depends only on the key inputs.
+
+    Returns (R, t, info, cache_hit). A cache read/write failure falls back to register(),
+    so a stale or corrupt file can never change the mapping, only its speed.
+    """
+    if not use_cache or not cache_path:
+        return register(cap_pts, ring_pts, **kw) + (False,)
+
+    key = _cache_key(cap_pts, ring_pts, kw)
+    entries = {}
+    if os.path.isfile(cache_path):
+        try:
+            with open(cache_path, encoding="utf-8") as f:
+                data = json.load(f)
+            entries = data.get("entries") if isinstance(data, dict) else None
+            if not isinstance(entries, dict):
+                entries = {}
+        except Exception:  # noqa: BLE001 - a broken cache is just a miss
+            entries = {}
+    hit = entries.get(key)
+    if isinstance(hit, dict):
+        try:
+            R = np.array(hit["R"], dtype=float)
+            t = np.array(hit["t"], dtype=float)
+            if R.shape == (2, 2) and t.shape == (2,):
+                return R, t, dict(hit["info"]), True
+        except Exception:  # noqa: BLE001
+            pass
+
+    R, t, info = register(cap_pts, ring_pts, **kw)
+    entries[key] = {"R": R.tolist(), "t": t.tolist(), "info": info}
+    for old in list(entries)[:-CACHE_LIMIT]:
+        entries.pop(old, None)
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(cache_path)), exist_ok=True)
+        tmp = cache_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"_schema": "photo-plane-registration-cache-v1", "entries": entries},
+                      f, ensure_ascii=False, indent=0)
+        os.replace(tmp, cache_path)
+    except Exception:  # noqa: BLE001 - never fail the mapping because of the cache
+        pass
+    return R, t, info, False
+
+
 # ---------------------------------------------------------------- planes
 def capture_planes(meta):
     """Exact planes of the capture (same code the Naver VR refs use)."""
@@ -310,6 +372,10 @@ def main():
                     help="warn below this capture resolution (window widths need ~20, louver slats ~30)")
     ap.add_argument("--max-perp", type=float, default=1.5, help="max distance of the plane from the model edge (m)")
     ap.add_argument("--out", default="work/plane_to_edge.json")
+    ap.add_argument("--cache", default="work/registration_cache.json",
+                    help="registration cache inside the project (empty string disables it)")
+    ap.add_argument("--no-cache", action="store_true",
+                    help="ignore and do not update the registration cache")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
 
@@ -334,7 +400,7 @@ def main():
     if len(cap_pts) < 4:
         raise SystemExit("capture meta has no footprint_m")
 
-    R, t, reg = register(cap_pts, ring_pts)
+    R, t, reg, cache_hit = register_cached(cap_pts, ring_pts, None if a.no_cache else a.cache)
     warnings = []
     if reg["residual_mean_m"] > 0.5:
         warnings.append("registration residual %.2f m: the model outline and the capture outline disagree"
@@ -413,6 +479,9 @@ def main():
            "mass": {"file": os.path.relpath(mass_path, ROOT), "volume": vol.get("id"),
                     "edges": len(ring)},
            "registration": reg,
+           "registration_cache": {"path": os.path.relpath(os.path.abspath(a.cache), ROOT).replace(os.sep, "/")
+                                  if a.cache and not a.no_cache else None,
+                                  "hit": cache_hit},
            "model_edges": edges_out,
            "planes": planes_out,
            "warnings": warnings,
@@ -425,8 +494,9 @@ def main():
         print(json.dumps(out, ensure_ascii=False))
         return 0
 
-    p("registration: rot %.2f deg, residual mean %.2f m / max %.2f m  (model %s, %d edges)"
-      % (reg["rot_deg"], reg["residual_mean_m"], reg["residual_max_m"], out["mass"]["volume"], len(ring)))
+    p("registration: rot %.2f deg, residual mean %.2f m / max %.2f m  (model %s, %d edges)%s"
+      % (reg["rot_deg"], reg["residual_mean_m"], reg["residual_max_m"], out["mass"]["volume"], len(ring),
+         "  [cache hit]" if cache_hit else ""))
     p("")
     p("%-6s %-5s %8s %-6s %9s %9s %6s %7s %7s %7s  %s"
       % ("plane", "grp", "len_m", "edge", "left_m", "right_m", "cover", "perp", "cap_px", "file_px", "warn"))
