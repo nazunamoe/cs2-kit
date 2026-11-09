@@ -376,6 +376,8 @@ def main():
                     help="registration cache inside the project (empty string disables it)")
     ap.add_argument("--no-cache", action="store_true",
                     help="ignore and do not update the registration cache")
+    ap.add_argument("--strict", action="store_true",
+                    help="exit 1 when a plane is below --min-px-per-m (a capture that cannot be measured)")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
 
@@ -473,6 +475,9 @@ def main():
         if not covering:
             warnings.append("model edge %d (%.2f m) has no photo plane" % (k, Ld))
 
+    low_res = [q for q in planes_out
+               if any(w.startswith("capture resolution") for w in q["warnings"])]
+
     out = {"_schema": "photo-plane-map-v1",
            "_help": "photo planes of the capture mapped onto the model ring; photo u=0 -> photo_left_m",
            "capture": {"meta": a.meta, "dong": meta.get("dong")},
@@ -492,7 +497,7 @@ def main():
 
     if a.json:
         print(json.dumps(out, ensure_ascii=False))
-        return 0
+        return 1 if (a.strict and low_res) else 0
 
     p("registration: rot %.2f deg, residual mean %.2f m / max %.2f m  (model %s, %d edges)%s"
       % (reg["rot_deg"], reg["residual_mean_m"], reg["residual_max_m"], out["mass"]["volume"], len(ring),
@@ -514,6 +519,10 @@ def main():
             p("  - " + w)
     p("")
     p("wrote %s" % a.out)
+    if a.strict and low_res:
+        p("strict: %d plane(s) below %.0f px/m - recapture before measuring columns"
+          % (len(low_res), a.min_px_per_m))
+        return 1
     return 0
 
 

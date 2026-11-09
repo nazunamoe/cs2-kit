@@ -26,6 +26,7 @@ python tools/photo_plane_map.py --project namsan_xihanulche \
 | `--out` | 결과 json (기본 `work/plane_to_edge.json`) |
 | `--cache` | 등록 캐시 파일 (기본 `work/registration_cache.json`, 빈 문자열이면 끔) |
 | `--no-cache` | 캐시를 읽지도 쓰지도 않고 항상 다시 등록 |
+| `--strict` | `--min-px-per-m` 미만 평면이 있으면 exit 1 (측정 불가 캡처를 스크립트에서 차단) |
 | `--json` | 표 대신 json 전체 출력 |
 
 ## 등록 캐시

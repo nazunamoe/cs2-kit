@@ -43,6 +43,13 @@ python tools/agent.py cycle --project <project> --generator <name>_cs2.py --mode
 - `visual`: OBJ, preview, and photo checks when refs exist.
 - `final`: Blender FBX/.blend, preview, shared photo/tile analysis, full LOD, and strict gate.
 
+Add `--jsonl work/gates.jsonl` to append one record per run (time, mode, label, status, checks, hashes, gate path). The history survives state resets and makes failure patterns greppable:
+
+```bash
+python tools/agent.py cycle --project <project> --generator <name>_cs2.py --mode final --label final --jsonl work/gates.jsonl --json
+jq -c 'select(.status!="PASS")' <project>/work/gates.jsonl
+```
+
 Follow the JSON `next_action`. Do not parse full logs unless the summary points to them. Detailed reports are in `output/<asset>/_check/gate.json`; raw output is in `work/logs/last_cycle.log`.
 
 Build order: mass -> windows -> facade parts -> roof -> LOD -> textures -> YAML -> final. Correct mass and floor pitch before detail.

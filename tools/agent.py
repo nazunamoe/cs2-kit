@@ -227,6 +227,22 @@ def normalized_cycle(args):
             "action_tags": (gate.get("agent") or {}).get("action_tags", []), "next_action": state["next_action"],
             "gate": gate_path, "state": os.path.relpath(STATE, ROOT), "log": os.path.relpath(log_path, ROOT),
         }
+        if args.jsonl:
+            record = {
+                "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+                "mode": args.mode, "label": args.label or None, "status": status, "project": NAME,
+                "generator": os.path.relpath(generator, ROOT), "generator_hash": gen_hash,
+                "preview_hash": preview_hash, "checks": gate.get("checks", {}),
+                "photo_mismatch": (gate.get("photo") or {}).get("mismatch"), "gate": gate_path,
+                "next_action": state["next_action"].get("command") if state.get("next_action") else None,
+            }
+            jsonl_path = args.jsonl if os.path.isabs(args.jsonl) else os.path.join(ROOT, args.jsonl)
+            try:
+                os.makedirs(os.path.dirname(jsonl_path) or ".", exist_ok=True)
+                with open(jsonl_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+            except OSError as ex:  # noqa: BLE001 - logging must not decide the gate
+                sys.stderr.write("[jsonl] write failed: %s\n" % ex)
         if args.brief:
             result = {"status": status, "project": NAME, "mode": args.mode, "next_action": state["next_action"]}
             if status != "PASS":
@@ -565,6 +581,7 @@ def main():
     p.add_argument("--generator", required=True)
     p.add_argument("--mode", choices=("quick", "visual", "final"), default="quick")
     p.add_argument("--label", default="")
+    p.add_argument("--jsonl", help="append one compact record per run to this file (relative paths are inside the project)")
     p.set_defaults(fn=normalized_cycle)
     p = sub.add_parser("fix")
     p.add_argument("--json", action="store_true")
