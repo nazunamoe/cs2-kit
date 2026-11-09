@@ -14,11 +14,17 @@ python tools/agent.py cycle --project P --generator G --mode quick|visual|final 
 python tools/agent.py review --project P --status PASS|FAIL|NEEDS_HUMAN_REVIEW --note NOTE --artifact PATH --json
 python tools/agent.py photos --project P --page 0 --page-size 16 --json
 python tools/agent.py observe --project P --photo photos/front.jpg --side front --note NOTE --json
+python tools/agent.py probe --project P --shot 101_side5.png --frame work/frame_101.json --px X,Y [--px X,Y | --frac FX,FY] --json
+python tools/agent.py colordiff --project P --shot 103_side15.png --frame work/frame_103.json --color tan --json
 python tools/agent.py fix --project P --generator G --request TEXT --box=x0,x1,y0,y1,z0,z1 --json
 python tools/agent.py fix --project P --generator G --finish --json
 ```
 
-The agent result contains `status`, per-check states, errors/warnings, `next_action`, and paths to detailed gate/log/state files. It deliberately does not echo the full report. Agent runs use a per-project lock and explicit project paths.
+The agent result contains `status`, per-check states, errors/warnings, `next_action`, and paths to detailed gate/log/state files. It deliberately does not echo the full report. Agent runs use a per-project lock and explicit project paths. A lock whose process has exited (or whose pid was recycled) is removed with a `[lock]` notice on stderr; a lock held by a live run ends the command with exit code 3 and, with `--json`, `{"status": "LOCKED", "pid": ...}` on stdout. Exit codes: 0 PASS, 1 FAIL, 2 INCOMPLETE, 3 LOCKED.
+
+`probe` (read-only, needs the asset `.blend` from a final build) answers "which face, material and coordinate does this photo pixel land on?" before you edit: it casts a ray through the pixel with the same camera as `tools/qa/cmp_cam.py --frame` (LOD meshes removed) and prints the object (main or window), atlas region, normal, asset xyz and generator xyz. Pixels are in the original photo; `--frac` takes fractions of width and height. Parts the generator rotates are not converted to local coordinates. 104 needs `--frame work/frame_104_gen.json`.
+
+`colordiff` (read-only, same prerequisites) lists where the photo shows a colour the model does not paint there: it finds photo pixels of one colour class (`tan` is the validated one; `white`/`dark`/`bluegrey` are coarse), probes them, and compares with the colour of the material hit (read from the asset's BaseColor atlas, nothing hard-coded). Mismatches are grouped by wall normal, position along the wall and material; groups below `--min-hits` (default 3) are hidden. Use several shots of the same wall to confirm a group.
 
 ## Shared cycle gate
 
@@ -88,6 +94,9 @@ python tools/extract_texture.py photos/front.jpg --pts 812,402,1290,380,1302,905
 
 - `facade_paint.py floors|windows|paint|all`: reads one wall from `photo_refs.json`; verify generated images visually.
 - `facade_read.py`: normalized U/V facade output plus a combined `facade_read.json`; `--json` prints one machine-readable blob. v1, synthetic-image validation only.
+- `tools/qa/color_diff.py` / `agent.py colordiff`: photo colour vs model material mismatch list (see above); built on `probe.probe_rows`.
+- `tools/qa/lod_check.py` hole report: each `at gen` line (the BACK face seen through the hole) is followed by `near front face` lines = the nearest camera-facing faces around the hole (gap = distance from the hole to the face outline, m). A back-face point just beside the end of a near wall means a ray slipped past that wall's end; two near faces with gap ~0 on both sides mean a seam. Cached LOD results (`[lod] cached`, mesh unchanged) do not repeat these lines.
+- `tools/qa/probe.py` / `agent.py probe`: photo pixel -> model face, atlas region (material), normal and coordinates (see above). Use it to find which zone a photo detail belongs to; shares `cmp_cam.frame_camera` so the pixel matches the cmp_cam render.
 - `tools/qa/plane_compare.py`: register the capture camera, warp photo and model onto the same plane, and score each plane with block SSIM + edge overlap. Failing scores are written to `work/plane_compare/photo_mismatch_notes.yaml` and can be appended to the spec with `--spec`; `--strict` exits 1 on a miss.
 - `band_scan.py`: paint grid/palette with window and normalized U/V exclusion masks; unknown cells stay `-1` and unpainted. Verify `_mask.png` and real photos.
 - `capture/naver_vr.py`: repeatable VR capture, safe resume, camera-matrix planar refs. `make_refs` defaults to one best view per exact plane. See `docs/agent/NAVER_VR.md`.

@@ -310,7 +310,7 @@ def main():
             lod["status"] = "PASS" if "LODCHECK PASS" in line else "FAIL"
             print(f"[lod] {line}")
             for l in lines_l:
-                if l.startswith(("HOLE", "HOLE_SMALL", "NO_TEXTURE", "at gen", "WARN LOD")):
+                if l.startswith(("HOLE", "HOLE_SMALL", "NO_TEXTURE", "at gen", "near front", "WARN LOD")):
                     print("   " + l)
         else:
             why = next((l for l in reversed(lines_l) if ".blend" in l or "Blender" in l), "")

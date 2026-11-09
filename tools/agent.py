@@ -58,16 +58,89 @@ def command(mode, generator, extra=""):
     return f"python tools/agent.py cycle --project {NAME} --generator {generator} --mode {mode} --json{extra}"
 
 
+EXIT_LOCKED = 3   # 0 PASS / 1 FAIL / 2 INCOMPLETE are gate results; a busy project is none of them
+
+
+def _process_started(pid):
+    """(alive, start_time_epoch or None). Windows: OpenProcess/GetExitCodeProcess (os.kill(pid, 0) would send Ctrl+C there)."""
+    if pid <= 0:
+        return False, None
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.OpenProcess.restype = wintypes.HANDLE
+        handle = k32.OpenProcess(0x1000, False, pid)           # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return ctypes.get_last_error() == 5, None           # 5 = access denied: it exists; 87 = no such process
+        try:
+            code = wintypes.DWORD()
+            if k32.GetExitCodeProcess(handle, ctypes.byref(code)) and code.value != 259:   # 259 = STILL_ACTIVE
+                return False, None
+            created, ex1, ex2, ex3 = (wintypes.FILETIME() for _ in range(4))
+            started = None
+            if k32.GetProcessTimes(handle, ctypes.byref(created), ctypes.byref(ex1), ctypes.byref(ex2), ctypes.byref(ex3)):
+                ticks = (created.dwHighDateTime << 32) | created.dwLowDateTime
+                started = ticks / 1e7 - 11644473600            # FILETIME (1601, 100 ns) -> unix epoch
+            return True, started
+        finally:
+            k32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False, None
+    except PermissionError:
+        return True, None
+    return True, None
+
+
+def _lock_stale(path):
+    """(stale, pid). A lock is stale when its process is gone, or the pid now belongs to a process that started after the lock was written."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = f.read().strip()
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return True, None
+    try:
+        pid = int(json.loads(raw)["pid"]) if raw.startswith("{") else int(raw)
+    except (ValueError, KeyError, TypeError):
+        return True, None                                        # unreadable lock: nothing can be waiting on it
+    alive, started = _process_started(pid)
+    if not alive:
+        return True, pid
+    if started is not None and started > mtime + 2:              # pid was recycled by a newer process
+        return True, pid
+    return False, pid
+
+
 @contextlib.contextmanager
 def project_lock():
     path = os.path.join(ROOT, "work", "agent.lock")
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd = None
+    for attempt in (0, 1):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError:
+            stale, pid = _lock_stale(path)
+            if stale and attempt == 0:
+                sys.stderr.write(f"[lock] removed stale lock {path} (pid {pid} is not running)\n")
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+                continue
+            msg = f"another agent run is active in {NAME}: {path} (pid {pid})"
+            if "--json" in sys.argv[1:]:
+                print(json.dumps({"status": "LOCKED", "project": NAME, "lock": path, "pid": pid, "message": msg}, ensure_ascii=False))
+                sys.stderr.write(msg + "\n")
+                raise SystemExit(EXIT_LOCKED)
+            sys.stderr.write(msg + "\n")
+            raise SystemExit(EXIT_LOCKED)
     try:
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        raise SystemExit(f"another agent run is active in {NAME}: {path}")
-    try:
-        os.write(fd, str(os.getpid()).encode("ascii"))
+        os.write(fd, json.dumps({"pid": os.getpid(), "time": datetime.datetime.now().isoformat(timespec="seconds")}).encode("ascii"))
         os.close(fd)
         yield
     finally:
@@ -468,6 +541,38 @@ def evidence(args):
     emit(result, args.json, code)
 
 
+def probe(args):
+    """Photo pixel -> model face/material/coordinate (tools/qa/probe.py). Read-only: needs the asset .blend from a final build."""
+    require_project()
+    probe_args = ["--shot", args.shot, "--frame", args.frame]
+    for flag, values in (("--px", args.px), ("--frac", args.frac)):
+        for v in values:
+            probe_args += [flag, v]
+    for flag, value in (("--asset", args.asset), ("--meta", args.meta)):
+        if value:
+            probe_args += [flag, value]
+    if args.json:
+        probe_args.append("--json")
+    code, log = run([PY, os.path.join(KIT, "tools", "qa", "probe.py"), "--project", NAME] + probe_args)
+    sys.stdout.write(log if log.endswith("\n") else log + "\n")
+    raise SystemExit(0 if code == 0 else 1)
+
+
+def colordiff(args):
+    """Photo colour vs model material mismatches (tools/qa/color_diff.py). Read-only: needs the asset .blend from a final build."""
+    require_project()
+    cmd = [PY, os.path.join(KIT, "tools", "qa", "color_diff.py"), "--project", NAME, "--shot", args.shot, "--frame", args.frame,
+           "--color", args.color, "--rows", str(args.rows), "--min-run", str(args.min_run), "--min-hits", str(args.min_hits)]
+    for flag, value in (("--asset", args.asset), ("--meta", args.meta)):
+        if value:
+            cmd += [flag, value]
+    if args.json:
+        cmd.append("--json")
+    code, log = run(cmd)
+    sys.stdout.write(log if log.endswith("\n") else log + "\n")
+    raise SystemExit(0 if code == 0 else 1)
+
+
 def observe(args):
     require_project()
     path = os.path.abspath(args.photo)
@@ -654,6 +759,26 @@ def main():
     p.add_argument("--json", action="store_true")
     p.add_argument("evidence_args", nargs=argparse.REMAINDER)
     p.set_defaults(fn=evidence)
+    p = sub.add_parser("probe", help="photo pixel -> model face, material and coordinate (read-only)")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--shot", required=True, help="photo name in photos/, e.g. 101_side5.png")
+    p.add_argument("--frame", required=True, help="scan frame json, e.g. work/frame_101.json (104: work/frame_104_gen.json)")
+    p.add_argument("--px", action="append", default=[], help="X,Y pixel in the original photo (repeatable)")
+    p.add_argument("--frac", action="append", default=[], help="FX,FY as fractions of width and height (repeatable)")
+    p.add_argument("--asset", default="")
+    p.add_argument("--meta", default="")
+    p.set_defaults(fn=probe)
+    p = sub.add_parser("colordiff", help="photo colour vs model material mismatches (read-only)")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--shot", required=True, help="photo name in photos/, e.g. 103_side15.png")
+    p.add_argument("--frame", required=True, help="scan frame json, e.g. work/frame_103.json")
+    p.add_argument("--color", default="tan", choices=("tan", "white", "dark", "bluegrey"))
+    p.add_argument("--rows", type=int, default=50, help="sample a pixel row every N px")
+    p.add_argument("--min-run", type=int, default=4, help="minimum colour run width in px")
+    p.add_argument("--min-hits", type=int, default=3, help="hide mismatch groups with fewer hits")
+    p.add_argument("--asset", default="")
+    p.add_argument("--meta", default="")
+    p.set_defaults(fn=colordiff)
     p = sub.add_parser("observe")
     p.add_argument("--json", action="store_true")
     p.add_argument("--photo", required=True)

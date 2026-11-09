@@ -92,9 +92,12 @@ def align(model, photo_size, pm, no_align):
     return canvas, s, inter / max(1, union)
 
 
-def frame_mode(a, blend, meta, shot, name):
+def frame_camera(frame_path, blend, meta, shot, W, H):
+    """Photo camera in asset coordinates for a rotated scan frame (shared with tools/qa/probe.py).
+    Returns dict(pos, target, lens, gen_pos, gen_dir, pivot): pos/target are asset coordinates (generator coordinates + pivot_shift),
+    lens is the Blender lens (36 mm sensor on the long side) that gives the meta vertical fov for a W x H image."""
     import math
-    F = json.load(open(a.frame, encoding="utf-8"))
+    F = json.load(open(frame_path, encoding="utf-8"))
     man = json.load(open(os.path.join(os.path.dirname(blend), "manifest.json"), encoding="utf-8"))
     px, py = man.get("pivot_shift", [0.0, 0.0])
     cam = shot["cam"]
@@ -107,17 +110,24 @@ def frame_mode(a, blend, meta, shot, name):
     gdx = math.cos(yaw) * md[0] + math.sin(yaw) * md[1]
     gdy = -math.sin(yaw) * md[0] + math.cos(yaw) * md[1]
     dist = meta["dist_m"]
-    photo = Image.open(a.photo).convert("RGB")
-    W, H = photo.size
     # Blender 센서 36 mm 는 긴 변(가로)에 걸리므로, 세로 화각 fov_v 가 되는 렌즈 = 18 / (tan(fov_v/2) * W/H)
     lens = 18.0 / (math.tan(math.radians(meta["fov_v_deg"]) / 2) * W / H)
+    return dict(pos=(gx + px, gy + py, gz), target=(gx + gdx * dist + px, gy + gdy * dist + py, gz), lens=lens,
+                gen_pos=(gx, gy, gz), gen_dir=(gdx, gdy), pivot=(px, py))
+
+
+def frame_mode(a, blend, meta, shot, name):
+    photo = Image.open(a.photo).convert("RGB")
+    W, H = photo.size
+    C = frame_camera(a.frame, blend, meta, shot, W, H)
+    (gx, gy, gz), (gdx, gdy), lens = C["gen_pos"], C["gen_dir"], C["lens"]
     od = os.path.join(a.out, os.path.splitext(name)[0])
     os.makedirs(od, exist_ok=True)
     out = os.path.join(od, "model.png")
     # 에셋 좌표 = 생성기 좌표 + pivot_shift (키트가 피벗을 바닥 가운데로 옮긴 만큼)
     cmd = [blender_exe(), "-b", blend, "-P", os.path.join(KIT, "tools", "qa", "modcam.py"), "--", os.path.abspath(out),
-           "%f" % (gx + px), "%f" % (gy + py), "%f" % gz, "%f" % (gx + gdx * dist + px), "%f" % (gy + gdy * dist + py), "%f" % gz,
-           "%f" % lens, str(W), str(H)]
+           "%f" % C["pos"][0], "%f" % C["pos"][1], "%f" % C["pos"][2],
+           "%f" % C["target"][0], "%f" % C["target"][1], "%f" % C["target"][2], "%f" % lens, str(W), str(H)]
     r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if not os.path.exists(out):
         raise SystemExit("CMPCAM FAIL modcam render failed: " + (r.stdout + r.stderr)[-600:])
