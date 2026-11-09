@@ -24,7 +24,19 @@ python tools/photo_plane_map.py --project namsan_xihanulche \
 | `--min-px-per-m` | 캡처 해상도가 이보다 낮으면 경고 (기본 20) |
 | `--max-perp` | 평면과 모델 벽의 허용 거리 (기본 1.5 m) |
 | `--out` | 결과 json (기본 `work/plane_to_edge.json`) |
+| `--cache` | 등록 캐시 파일 (기본 `work/registration_cache.json`, 빈 문자열이면 끔) |
+| `--no-cache` | 캐시를 읽지도 쓰지도 않고 항상 다시 등록 |
 | `--json` | 표 대신 json 전체 출력 |
+
+## 등록 캐시
+
+등록 결과는 **캡처 외곽선 + 모델 링 + 탐색 파라미터**만의 함수다. 이 셋을 sha256 키로
+묶어 `work/registration_cache.json`에 저장하고, 같은 입력이면 chamfer 탐색을 건너뛴다.
+
+- 입력이 하나라도 바뀌면(매스 수정, 캡처 재촬영, `simplify_ring` 결과 변화) 키가 달라져 자동으로 다시 등록한다.
+- 캐시 파일이 깨졌거나 읽기/쓰기에 실패하면 조용히 `register()`로 넘어간다. **속도만 잃고 결과는 바뀌지 않는다.**
+- 결과 json의 `registration_cache`에 `{"path": ..., "hit": true|false}`가 남는다. 표 출력에는 `[cache hit]`이 붙는다.
+- 101동 기준 전체 실행 2.35 s → 0.56 s (등록 부분 약 1.8 s 절약). 캐시를 의심하면 `--no-cache`로 확인한다.
 
 ## 하는 일
 
