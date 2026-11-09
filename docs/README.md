@@ -19,6 +19,7 @@
 | [`agent/XRX_MASS.md`](agent/XRX_MASS.md) | VR 메타만으로 매스 초안 |
 | [`agent/PANORAMA_360.md`](agent/PANORAMA_360.md) | 360 사진을 원근 크롭 |
 | [`agent/VIDEO_FRAMES.md`](agent/VIDEO_FRAMES.md) | 영상 답사에서 프레임 추출 |
+| [`agent/PHOTO_QUALITY.md`](agent/PHOTO_QUALITY.md) | 사진 블러·해상도·중복·노출 점검 |
 | [`agent/IFC_TO_GLB.md`](agent/IFC_TO_GLB.md) | IFC·CAD를 GLB로 변환 |
 | [`agent/PHOTO_ONLY.md`](agent/PHOTO_ONLY.md) | GLB 없이 사진 증거로 작업 |
 | [`agent/POWERSHELL.md`](agent/POWERSHELL.md) | Edit 도구를 못 쓸 때의 편집 대체 |

@@ -164,6 +164,14 @@ python tools/video_frames.py --project my-apt --video photos/walk.mp4 \
 
 ffmpeg가 없으면 `pip install imageio-ffmpeg`로 설치합니다. 구간·장수·품질 옵션은 [영상 프레임 추출](docs/agent/VIDEO_FRAMES.md)을 참고하세요.
 
+캡처·추출한 사진은 입면 작업 전에 품질을 점검합니다.
+
+```bash
+python tools/photo_quality.py --project my-apt --dir photos --json
+```
+
+블러·해상도·중복·노출 기준은 [사진 품질 게이트](docs/agent/PHOTO_QUALITY.md)를 참고하세요.
+
 IFC·CAD는 GLB로 변환한 뒤 매스를 만듭니다.
 
 ```bash
@@ -296,6 +304,7 @@ python tools/agent.py fix --project my-apt --generator my_apt_cs2.py --finish --
 - [파사드 스타일과 브리프](templates/styles/README.md)
 - [360 사진 원근 크롭](docs/agent/PANORAMA_360.md)
 - [영상 프레임 추출](docs/agent/VIDEO_FRAMES.md)
+- [사진 품질 게이트](docs/agent/PHOTO_QUALITY.md)
 - [IFC에서 GLB로](docs/agent/IFC_TO_GLB.md)
 - [네이버 VR 메타데이터 매스](docs/agent/XRX_MASS.md)
 - [상가·학교·비정형 볼륨](docs/agent/VOLUMES.md)
