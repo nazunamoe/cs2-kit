@@ -170,7 +170,13 @@ ffmpeg가 없으면 `pip install imageio-ffmpeg`로 설치합니다. 구간·장
 python tools/photo_quality.py --project my-apt --dir photos --json
 ```
 
-블러·해상도·중복·노출 기준은 [사진 품질 게이트](docs/agent/PHOTO_QUALITY.md)를 참고하세요.
+블러·해상도·중복·노출 기준은 [사진 품질 게이트](docs/agent/PHOTO_QUALITY.md)를 참고하세요. 색을 추출할 때는 그림자 부분을 흰 벽 기준으로 보정해야 합니다.
+
+```bash
+python tools/shadow_norm.py --image photos/wall.png --out photos/wall_lit.png --block 64
+```
+
+`shadow_norm`는 밝은 흰 벽을 기준으로 블록별 배율을 만들어, 그늘진 벽도 같은 재질 색으로 측정되게 합니다.
 
 IFC·CAD는 GLB로 변환한 뒤 매스를 만듭니다.
 
