@@ -91,6 +91,24 @@ For complex tasks, consult the advisor before committing to an approach, when an
 - If the tool is unavailable, launch the read-only `advisor` subagent and pass a compact summary: goal, attempts, errors, changed files.
 - The advisor cannot edit files or run commands. Treat its output as advice, not as verified fact.
 
+## Work routing (which model does the work)
+
+The executor model is enough for routine edits, gate runs and reporting. Complex work is
+done by the advisor model (`ollama-cloud/minimax-m3.1-flash`) through a work-capable
+subagent, so the stronger model is doing the shaping, not only advising.
+
+- Delegate to the builder: mass/shape and floor/bay changes, window and louver layout,
+  facade paint, atlas/texture surgery, LOD reconstruction, and any task that needs several
+  coupled edits or that already failed once.
+- Keep inline: single-value edits, running the gates, reading artifacts, the final report.
+- Preferred: the `builder` subagent (`agent "builder"`), pinned to the advisor model and
+  allowed to edit and run commands. If this session does not list `builder` yet (agent
+  definitions load at start), use `general` with `model "ollama-cloud/minimax-m3.1-flash#high"`.
+- Give the subagent a compact brief: goal, files, constraints, the gate to run and what to
+  report. It must follow the same non-negotiable rules and gates as the executor.
+- The executor verifies the result (gates + artifacts) and owns the final report; a subagent
+  claim is not a PASS.
+
 Before reporting a tower or revising a first-pass build, in this order:
 1. Verify floor count and roof heights from scan orthographic tops (`pair_ortho` views 0/180/90, ±0.1 m); convert frame z to generator z.
 2. Compare sibling/twin towers' zone lists for missing pieces (parapets, roof boxes) before measuring anything new.
