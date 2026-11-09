@@ -9,7 +9,7 @@
 | `tools/qa/` | **검증** (보고 전) | `verify.py`(병렬 일괄; `--fast` 반복용, `--all-shots`, 점수 기록), `cmp_all.py`(meta 사진 전부 비교), `lod_check.py`(투명 구멍; `--quick`), `cmp_cam.py`(사진과 같은 카메라 비교), `lodcam.py`(LOD 하나만 뒷면 숨김 렌더), `modcam.py`(낮은 거리 카메라 렌더) |
 | `tools/scan/` | 스캔(.glb) 분석·읽기 | `scan_tool.py list|info|roof|slice|elev|top|compare|report`, `scanlib.py`; 텍스처 풀기 `ktx2raw.js`+`raw2png.py`(KTX2→PNG; 변환기 `basis/` 는 배포본에 없음 — three.js `examples/jsm/libs/basis` 의 `basis_transcoder.cjs/.wasm` 을 `tools/scan/basis/` 에 둔다), `strip_glb.py`(블렌더용); 단면·높이장 `slice.py`, `slicez.py`, `toplevels.py`, `toptable.py`; 위에서 본 정사영 `top.py` |
 | `tools/facade/` | 입면 측정·비교 (스캔 정사영, 창·띠·난간 측정, VR 카메라 렌더) | `pair_ortho.py`(단일 면, 또는 `--frames` 여러 면 일괄), `elevstat.py cols|profile|runs|rows`, `winlist.py`, `wmask.py`, `model_photo_cam.py`, `scan_photo_cam.py`, `elev.py`, `scancam.py`, `scancam_raw.py`, `rail_edges→rail_survey→rail_decide→rail_table`(활성 프로젝트의 생성기를 `_gen.py` 가 찾음), `vsphoto.py`, `coplanar_diag.py` … README |
-| `tools/samhan_facade/` | 특정 생성기 구조(평면 API `HALF`, `edges_of()`, `floor_z()` …)와 사진 등록부에 묶인 도구. 같은 일을 생성기 없이 하는 공용판 = `tools/facade_paint.py` + `tools/facade/winlist.py` | `refuge_scan.py`, `window_template.py` … README |
+| `tools/photo_facade/` | 특정 생성기 구조(평면 API `HALF`, `edges_of()`, `floor_z()` …)와 사진 등록부에 묶인 도구. 같은 일을 생성기 없이 하는 공용판 = `tools/facade_paint.py` + `tools/facade/winlist.py` | `refuge_scan.py`, `window_template.py` … README |
 
 ## 통합 검증 (`tools/qa/verify.py`)
 `python tools/qa/verify.py --label <단계>` — 공통 `cycle.py final` gate 를 실행한 뒤, 프로젝트 `verify.json` 에 지정한 same-camera 검사를 병렬로 추가한다. 일반 실행은 strict final 이므로 FBX·LOD·미리보기·사진·타일 결과가 한 gate 에 모인다.

@@ -1,9 +1,10 @@
 import os, sys  # noqa: E401
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _common import ROOT, gen, GLB  # noqa: E402,F401
+from _common import ROOT, GEN, gen, GLB  # noqa: E402,F401
 import sys, collections
 import importlib
-B = importlib.import_module(sys.argv[1] if len(sys.argv) > 1 else os.environ.get('FACADE_GEN', 'ResidentialHighSamhanGoldenviewA_cs2'))
+target = sys.argv[1] if len(sys.argv) > 1 else GEN
+B = importlib.import_module(target)
 TA = getattr(B, 'TA', B)
 calls = collections.Counter(); kinds = collections.Counter()
 orig = TA.window_unit

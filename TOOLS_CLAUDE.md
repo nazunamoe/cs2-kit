@@ -90,7 +90,7 @@ python tools/extract_texture.py photos/front.jpg --pts 812,402,1290,380,1302,905
 - `glb_measure.py scan.glb --list`, then `--mesh`/`--box`: overall dimensions and elevations.
 - `glb_slices.py`: individual wall segments from explicit GLB slices; v1.
 - `glb_shape.py` / `agent.py glb-mass`: multi-height outer footprints, simplified polygon volumes, automatic or explicit height tiers, source provenance, and a review preview. See `docs/agent/GLB_MASS.md`.
-- `tools/samhan_facade/`: one legacy generator structure only; do not use on unrelated generators.
+- `tools/photo_facade/`: one legacy generator structure only; do not use on unrelated generators.
 
 Scans are measurement references. Never copy their geometry or textures into the asset.
 

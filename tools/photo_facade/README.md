@@ -1,4 +1,4 @@
-# tools/samhan_facade — 사진으로 외벽 도색·창을 읽는 보조 도구
+# tools/photo_facade — 사진으로 외벽 도색·창을 읽는 보조 도구
 
 > 다른 건물에는 생성기 없이 쓰는 범용판 `tools/facade_paint.py` 를 먼저 쓰세요. 이 폴더는 삼한골든뷰 생성기 구조 전용입니다.
 
@@ -13,7 +13,7 @@
 
 ```
 프로젝트루트/
-  tools/samhan_facade/        <- 이 폴더 통째로 복사
+  tools/photo_facade/        <- 이 폴더 통째로 복사
   <Name>A_cs2.py       <- 생성기 (아래 "생성기 조건" 참고)
   atype-1.png ...      <- 사진
   tools/ previews/ ...
@@ -56,13 +56,13 @@ dict(file="atype-1.png", masks=labels(...), secs=[
 ## 2. 도구별 사용법
 
 ### plan_index.py — 평면 edge 번호 그림
-`python tools/samhan_facade/plan_index.py` → `previews/plan_A.png`, `plan_B.png` (벽 번호, 파랑=is_bal, 빨강=머리 벽).
+`python tools/photo_facade/plan_index.py` → `previews/plan_A.png`, `plan_B.png` (벽 번호, 파랑=is_bal, 빨강=머리 벽).
 edge `i` 와 `i+28` 은 점대칭 짝입니다(평면 위치 a → -a).
 
 ### facade_read.py — 표시된 확대 사진 + 층별 구역 표
 ```
-python tools/samhan_facade/facade_read.py A 0 bar --chunks 3 --f 24,57          # 확대 그림 3장
-python tools/samhan_facade/facade_read.py A 0 bar --table --walls 12,14         # 층별 구역 표
+python tools/photo_facade/facade_read.py A 0 bar --chunks 3 --f 24,57          # 확대 그림 3장
+python tools/photo_facade/facade_read.py A 0 bar --table --walls 12,14         # 층별 구역 표
   옵션: --a al,ar --px pl,pr (구간 맞춤 덮어쓰기)  --zoom 2.5  --rowh 0.62
 ```
 - 그림: 왼쪽 빨간 눈금 = 층 바닥선과 층 번호, 위쪽 자홍 = 벽 경계, 하늘색 = 모델 창 위치(L/M/m/S/V).
@@ -72,7 +72,7 @@ python tools/samhan_facade/facade_read.py A 0 bar --table --walls 12,14         
 
 ### refuge_scan.py — 대피층부터 층을 세어 층별 점수 (핵심 도구)
 ```
-python tools/samhan_facade/refuge_scan.py A 0 bar --rowa px:932:947 --gapa px:735:770 \
+python tools/photo_facade/refuge_scan.py A 0 bar --rowa px:932:947 --gapa px:735:770 \
        --spans "w12:-5.3:4.4,w14:5.0:11.7" [--mode band|blue|light] [--show] [--refy 1375]
 ```
 - `--rowa`: 매 층(대피층 포함) 창이 있는 세로 띠(작은 창 S 열). `px:x0:x1` 또는 평면 위치 a.
@@ -84,23 +84,23 @@ python tools/samhan_facade/refuge_scan.py A 0 bar --rowa px:932:947 --gapa px:73
 - 맨 위 몇 줄(옥상·하늘)은 100 으로 나오니 무시합니다.
 
 ### band_scan.py — 등록된 층 번호 그대로의 띠 점수
-`python tools/samhan_facade/band_scan.py A 0 bar "12,14,s1:-3.6:-2.4" 24,56 [--shift -1]`
+`python tools/photo_facade/band_scan.py A 0 bar "12,14,s1:-3.6:-2.4" 24,56 [--shift -1]`
 `refuge_scan` 과 같은 점수지만 `PHOTOS` 의 `fl` 번호를 씁니다(`--shift` 로 보정). 두 사진(앞/뒤 짝 벽) 결과를 나란히 비교할 때 편합니다.
 
 ### window_template.py — 여러 층을 겹친 "한 층 창 모양"
-`python tools/samhan_facade/window_template.py A 4 head 42 56 [a_l a_r px_l px_r]`
+`python tools/photo_facade/window_template.py A 4 head 42 56 [a_l a_r px_l px_r]`
 → 창마다 평면 위치 a 범위, 폭(m), 높이 z(m)를 출력하고 `previews/wtpl_*.png` 저장. 대피층은 자동 제외
 (`f0 = f1 = 29` 로 주면 대피층만). 해가 드는 사진에서 가장 정확합니다. 이 값으로 생성기 `WIN` 표를 씁니다.
 
 ### refuge_crop.py — 27~31층만 3배 확대
-`python tools/samhan_facade/refuge_crop.py A 0 bar previews/ref.png` → 대피층 줄을 빨간 막대로 표시. 대피층 창 확인용.
+`python tools/photo_facade/refuge_crop.py A 0 bar previews/ref.png` → 대피층 줄을 빨간 막대로 표시. 대피층 창 확인용.
 
 ### montage.py — 겹침 그림 오른쪽 절반 이어 붙이기
-`python tools/samhan_facade/montage.py "previews/paint_detail/B_btype-*.png" previews/m.png`
+`python tools/photo_facade/montage.py "previews/paint_detail/B_btype-*.png" previews/m.png`
 
 ### window_count.py — 모델 층별 창 개수
-`python tools/samhan_facade/window_count.py ResidentialHighSamhanGoldenviewB_cs2` → 25~33층 창 개수.
-대피층만 개수가 줄어야 정상입니다(이번: 다른 층 50, 29층 12).
+`python tools/photo_facade/window_count.py <GeneratorModule>` → 25~33층 창 개수.
+생략하면 프로젝트의 `*A_cs2.py`(또는 `FACADE_GEN`)를 씁니다. 대피층만 개수가 줄어야 정상입니다.
 
 ### glb_slices.py / glb_mirror_test.py — 스캔 평면 비교
 - `glb_slices.py`: 각 메시를 바닥+100 m 높이에서 잘라 위에서 본 외곽선 → `previews/glb_slices.png`.

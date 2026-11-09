@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 photo_sections.py (was paint_from_detail.py) - photo section registry PHOTOS + row fit, used by every
-tools/samhan_facade script. Its old main() (per-cell auto paint, do NOT use for final paint) reads the paint of every wall, floor by floor, from the near-frontal detail photos
+tools/photo_facade script. Its old main() (per-cell auto paint, do NOT use for final paint) reads the paint of every wall, floor by floor, from the near-frontal detail photos
 (atype-1..8, btype-1..8: 3D-map facade views, labels "NN F" mark floors).
 
 Every photo is cut into SECTIONS (one depth group of walls that face the camera, e.g. the near head or the bar
@@ -138,7 +138,7 @@ PHOTOS = {
 }
 
 
-# The registry above is the Samhan Goldenview example (kept as a model for new entries).
+# The registry above is a sample entry (kept as a model for new entries).
 # For a new building: register its photos in PHOTOS below (or set PHOTOS = EXAMPLE_PHOTOS to try the example).
 EXAMPLE_PHOTOS = PHOTOS
 PHOTOS = {"A": [], "B": []}
