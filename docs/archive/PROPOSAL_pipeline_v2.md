@@ -1,12 +1,7 @@
 # PROPOSAL — 파이프라인 2차 개선안 (역사 문서)
 
-<<<<<<< HEAD
-> 이 문서는 2026-11-04 당시 설계안을 보존한 것이다. 프리셋·소켓·읽기 도구는 이후 구현됐고,
-> action tag와 최신 실행 절차는 `TOOLS.md` 와 `docs/agent/WORKFLOW.md` 를 기준으로 한다.
-=======
 > 이 문서는 당시 설계안을 보존한 것이다. 프리셋·소켓·읽기 도구는 이후 구현됐고,
-> action tag와 최신 실행 절차는 `TOOLS_CLAUDE.md` 와 `docs/agent/WORKFLOW.md` 를 기준으로 한다.
->>>>>>> 22958c9 (Remove dated annotations from docs and comments)
+> action tag와 최신 실행 절차는 `TOOLS.md` 와 `docs/agent/WORKFLOW.md` 를 기준으로 한다.
 > 아래의 미구현 표현과 옛 action tag를 현재 명세로 사용하지 않는다.
 
 이 문서는 사용자가 요청한 5가지 개선점의 **당시 설계안**이다.
