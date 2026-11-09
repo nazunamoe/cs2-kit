@@ -79,6 +79,37 @@ The previous broad wall grouping could combine edges up to 20 degrees apart or 3
 
 Always inspect `refs_check/` with `--debug`. The homography is exact only for the supplied plane and camera; terrain, incorrect XRX footprints, hidden surfaces, balconies, and vegetation still require review. `side` and street-front direction remain assumptions.
 
+### 커버리지 리포트 (`--report`)
+
+`make_refs`는 어떤 평면이 ref를 얻었는지, **왜 얻지 못했는지**, **해상도가 측정에 충분한지**를
+json으로 남길 수 있다. ref를 못 만든 평면이 조용히 사라지면 나중에 "이 면은 사진이 없구나"를
+모르게 되므로, 캡처를 마친 뒤 반드시 한 번 돌린다.
+
+```bash
+python capture/naver_vr.py make_refs --dir photos/ref101 --dongs 101 \
+  --prefix photos/ref101/ --per-wall 0 --report work/refs_report.json
+```
+
+리포트 내용:
+
+| 항목 | 뜻 |
+|---|---|
+| `planes[].refs[]` | 만들어진 ref (사진 파일, px/m, 보이는 높이, 정면성, 신뢰도) |
+| `planes[].shots[]` | 각 후보 사진의 판정: `verdict`(used/skip/candidate)와 `reason` |
+| `planes[].best_px_per_m` | 그 평면에서 얻은 최고 해상도 |
+| `planes[].warnings` | "no ref for this plane", "only N px/m: too low to measure window widths" 등 |
+| `warnings[]` | 전체 요약(사진 없는 6 m 이상 평면, 20 px/m 미만 평면) |
+
+탈락 사유는 사람이 읽는 말로 나온다: `other wall group`, `not frontal (cos 0.42 < 0.85)`,
+`visible height 3.1 m < 6.0 m`, `width 120 px < 300 px`.
+
+**해상도가 곧 측정 가능 여부다.** 평면의 px/m 은 그 평면이 사진에서 차지하는 픽셀 밀도다.
+`px/m` 이 20 미만이면 창 폭을 읽을 수 없고(루버 슬랫은 30 이상 필요), ref 파일을
+리샘플해서 늘려도 정보는 늘지 않는다. 이때는 `--width`(기본 0.4)를 키우고 브라우저 뷰포트를
+크게 잡아 **재캡쳐**해야 한다. 리포트 표에 `--min-px`/`--min-h`/`--min-cos` 임계값을 낮게
+넣으면 평면 자체가 아니라 사진이 부족한 것이 원인이므로, 임계값으로 값을 고치지 말고
+캡처 설정을 고친다.
+
 ## Paint exclusions and palette safety
 
 Add exclusions to a facade entry in normalized whole-entry wall coordinates. V is bottom=0 and top=1, not a per-floor value.

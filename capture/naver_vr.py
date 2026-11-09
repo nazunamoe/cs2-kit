@@ -1456,7 +1456,7 @@ def _side_of(n, nf, r):
     return max(c, key=lambda k: n[0] * c[k][0] + n[1] * c[k][1])
 
 
-def make_refs_one(meta, d, args):
+def make_refs_one(meta, d, args, report=None):
     groups, shots = meta.get("walls") or [], meta.get("shots") or []
     xz = meta.get("footprint_m") or []
     if not groups or not shots:
@@ -1471,14 +1471,20 @@ def make_refs_one(meta, d, args):
     g, roof = meta["ground_m"], meta["roof_m"]
     nf, r = _side_frame(xz, groups)
     facades, dbg = [], []
+    planes_report = []
     for w in walls:
         side = _side_of(w["normal"], nf, r)
         cand = []
+        checks = []
         for si, s in enumerate(shots):
             if "wall" in s and w["group_i"] is not None and s["wall"] != w["group_i"]:
+                checks.append({"shot": s["file"], "verdict": "skip",
+                               "reason": "other wall group (%s)" % s.get("wall")})
                 continue
             cf = _facing_cos(s, w)
             if cf < args.min_cos:
+                checks.append({"shot": s["file"], "facing_cos": round(cf, 3),
+                               "verdict": "skip", "reason": "not frontal (cos %.2f < %.2f)" % (cf, args.min_cos)})
                 continue
             W_, H_ = s["img"]
             mx, my = W_ * args.margin, H_ * args.margin
@@ -1502,6 +1508,9 @@ def make_refs_one(meta, d, args):
             y1 = g + (roof - g) * best[1] / N
             coverage = min(1.0, (y1 - y0) / (roof - g))
             if y1 - y0 < args.min_h:
+                checks.append({"shot": s["file"], "facing_cos": round(cf, 3),
+                               "visible_m": round(y1 - y0, 2), "verdict": "skip",
+                               "reason": "visible height %.1f m < %.1f m" % (y1 - y0, args.min_h)})
                 continue
             P = lambda x_, z_, y_: project_px(s, [x_, y_, z_], box, dpr, s["img"])
             pa0, pa1 = P(*w["p0"], y1), P(*w["p0"], y0)
@@ -1511,11 +1520,20 @@ def make_refs_one(meta, d, args):
             TR, BR = (pb0, pb1) if left_is_p0 else (pa0, pa1)
             wpx = ((TR[0] - TL[0]) + (BR[0] - BL[0])) / 2
             if wpx < args.min_px:
+                checks.append({"shot": s["file"], "facing_cos": round(cf, 3),
+                               "visible_m": round(y1 - y0, 2), "width_px": round(abs(wpx)),
+                               "verdict": "skip",
+                               "reason": "width %.0f px < %.0f px" % (abs(wpx), args.min_px)})
                 continue
             ppm = wpx / w["length_m"]
             score = cf ** 4 * coverage * math.sqrt(ppm)
+            checks.append({"shot": s["file"], "facing_cos": round(cf, 3),
+                           "visible_m": round(y1 - y0, 2), "width_px": round(abs(wpx)),
+                           "px_per_m": round(ppm, 1), "verdict": "candidate",
+                           "reason": "frontal, %.1f m visible, %.0f px wide" % (y1 - y0, abs(wpx))})
             cand.append((score, si, s, y0, y1, [TL, TR, BR, BL], ppm, cf, coverage))
         cand.sort(key=lambda c: -c[0])
+        used = []
         for _, si, s, y0, y1, cs, ppm, cf, coverage in cand[: args.per_wall or None]:
             name = f"{meta['dong']}_p{w['i']}_{si + 1}"
             confidence = "high" if cf >= 0.95 else "medium" if cf >= 0.90 else "low"
@@ -1533,6 +1551,24 @@ def make_refs_one(meta, d, args):
                 "paint_exclude": [],
                 "_info": f"plane {w['i']} group {w['group_i']} px/m {ppm:.1f} face_cos {cf:.2f}; camera-projected planar homography"})
             dbg.append((s["file"], name, cs))
+            used.append({"name": name, "shot": s["file"], "px_per_m": round(ppm, 1),
+                         "visible_m": round(y1 - y0, 2), "facing_cos": round(cf, 4),
+                         "confidence": confidence})
+        if report is not None:
+            warnings = []
+            big = w["length_m"] >= 6.0
+            if not used and big:
+                warnings.append("no ref for this plane (need a frontal photo of it)")
+            best_ppm = max([u["px_per_m"] for u in used], default=0.0)
+            if used and best_ppm < 20:
+                warnings.append("only %.0f px/m: too low to measure window widths (need 20)" % best_ppm)
+            if big and not used:
+                warnings.append("a %.1f m plane without a photo is a blind spot" % w["length_m"])
+            planes_report.append({
+                "plane": w["i"], "group": w["group_i"], "length_m": round(w["length_m"], 2),
+                "azimuth_deg": w["azimuth_deg"], "plane_error_m": w["plane_error_m"],
+                "refs": used, "shots": checks, "best_px_per_m": best_ppm or None,
+                "warnings": warnings})
     # 평면도(위성 대용): 외곽선을 정면이 아래로 오게 그린 이미지
     sat = None
     if xz:
@@ -1572,6 +1608,17 @@ def make_refs_one(meta, d, args):
             im.save(dd / f"{nm}.png")
     log(f"[{meta['dong']}] planar refs {len(walls)} -> facades {len(facades)}"
         + "".join(f"  p{w['i']}:{sum(1 for f in facades if f.get('source_plane_i') == w['i'])}" for w in walls))
+    if report is not None:
+        report["planes"] = planes_report
+        blind = [p for p in planes_report if p["length_m"] >= 6.0 and not p["refs"]]
+        low = [p for p in planes_report if p["refs"] and (p["best_px_per_m"] or 0) < 20]
+        report["warnings"] = []
+        if blind:
+            report["warnings"].append("planes of 6 m or more without any photo: %s"
+                                      % ", ".join(str(p["plane"]) for p in blind))
+        if low:
+            report["warnings"].append("planes below 20 px/m (window widths are not measurable): %s"
+                                      % ", ".join("%s(%.0f)" % (p["plane"], p["best_px_per_m"]) for p in low))
     return out
 
 
@@ -1580,21 +1627,45 @@ def cmd_make_refs(args):
     metas = sorted(d.glob("*_meta.json"))
     want = [s.strip() for s in args.dongs.split(",")] if args.dongs else None
     n = 0
+    reports = []
     for mf in metas:
         meta = json.loads(mf.read_text(encoding="utf-8"))
         if "dong" not in meta:
             continue
         if want and meta["dong"] not in want:
             continue
-        res = make_refs_one(meta, d, args)
+        rep = {"dong": meta["dong"], "meta": mf.name}
+        res = make_refs_one(meta, d, args, rep)
         if res is None:
             continue
         of = Path(args.out) if args.out and len(metas) == 1 else d / f"{meta['dong']}_photo_refs.json"
         of.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
         log(f"  -> {of}")
+        reports.append(rep)
         n += 1
     if not n:
         sys.exit("만든 파일 없음 (메타가 없거나 옛 버전)")
+    if args.report:
+        rp = Path(args.report)
+        if len(reports) == 1:
+            rp.write_text(json.dumps(reports[0], ensure_ascii=False, indent=1), encoding="utf-8")
+        else:
+            rp.write_text(json.dumps({"captures": reports}, ensure_ascii=False, indent=1), encoding="utf-8")
+        log(f"  -> {rp} (coverage report)")
+        for rep in reports:
+            for w in rep.get("warnings", []):
+                log(f"  WARN {rep['dong']}: {w}")
+    if not args.quiet:
+        for rep in reports:
+            print(f"[{rep['dong']}] plane coverage")
+            print("  %-6s %-5s %8s %7s %8s  %s" % ("plane", "grp", "len_m", "refs", "px/m", "note"))
+            for pl in rep.get("planes", []):
+                note = "; ".join(pl["warnings"]) if pl["warnings"] else ""
+                if not pl["refs"] and not note:
+                    note = "(short plane, no ref needed)"
+                print("  %-6d %-5s %8.2f %7d %8s  %s" % (
+                    pl["plane"], pl["group"] if pl["group"] is not None else "-", pl["length_m"], len(pl["refs"]),
+                    pl["best_px_per_m"] if pl["best_px_per_m"] else "-", note))
 
 
 def add_capture_args(x, with_out=True):
@@ -1670,6 +1741,8 @@ def main():
     m.add_argument("--ref-plane-deg", type=float, default=2.0, help="연속 변을 같은 평면으로 보는 최대 각도 차이")
     m.add_argument("--ref-plane-gap", type=float, default=0.05, help="연속 변을 같은 평면으로 보는 최대 깊이 오차(m)")
     m.add_argument("--plan-mpp", type=float, default=0.25)
+    m.add_argument("--report", help="write a coverage report json (per plane: refs, px/m, why it failed)")
+    m.add_argument("--quiet", action="store_true", help="do not print the coverage table")
     m.add_argument("--debug", action="store_true", help="refs_check/ 에 꼭짓점을 그린 사진 저장")
     a = ap.parse_args()
     {"list": cmd_list, "run": cmd_run, "batch": cmd_batch, "auto": cmd_auto, "make_refs": cmd_make_refs,

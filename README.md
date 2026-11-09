@@ -77,6 +77,10 @@ python capture/naver_vr.py make_refs --dir capture/out/<complex> --dongs 101 --p
 python tools/band_scan.py --refs photo_refs.json --name 101_p1_1 --fh 2.9 --out previews/paint_grid
 ```
 
+`make_refs --report work/refs_report.json`을 돌리면 **어느 평면이 사진 없이 남았는지**, 사진이
+부족한 이유, 평면별 해상도(px/m)를 한눈에 볼 수 있습니다. 창 폭을 읽으려면 20 px/m 이상이
+필요하므로, 낮게 나오면 캡처 폭을 키워 재캡쳐해야 합니다(리샘플로 늘려도 정보는 안 늘어납니다).
+
 `auto`는 URL 하나로 Chrome 디버그 모드를 띄우고, `projects/<name>/photos`에 바로 캡처하며, 새 프로젝트만 TASK.md를 채우고 기존 프로젝트에는 `TASK.auto.md` 제안만 남깁니다. 기존 사진은 `--overwrite` 없이는 덮어쓰지 않습니다.
 
 사진 캡처 없이 `data.xrx.json`만 있으면 동별 매스 초안을 만들 수 있습니다.
