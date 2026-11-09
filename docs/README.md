@@ -22,6 +22,8 @@
 | [`agent/PHOTO_QUALITY.md`](agent/PHOTO_QUALITY.md) | 사진 블러·해상도·중복·노출 점검 |
 | [`agent/IFC_TO_GLB.md`](agent/IFC_TO_GLB.md) | IFC·CAD를 GLB로 변환 |
 | [`agent/PHOTO_ONLY.md`](agent/PHOTO_ONLY.md) | GLB 없이 사진 증거로 작업 |
+| [`agent/PHOTO_PLANE_MAP.md`](agent/PHOTO_PLANE_MAP.md) | 사진 평면을 모델 벽에 등록(미터·반전·해상도) |
+| [`agent/SHADOW_NORM.md`](agent/SHADOW_NORM.md) | 그늘진 벽을 흰 벽 기준으로 보정해 색 추출 |
 | [`agent/POWERSHELL.md`](agent/POWERSHELL.md) | Edit 도구를 못 쓸 때의 편집 대체 |
 
 ## 모델링
@@ -40,14 +42,15 @@
 
 | 문서 | 언제 읽나 |
 |---|---|
-| [`../TOOLS_CLAUDE.md`](../TOOLS_CLAUDE.md) | 도구 명령과 API |
+| [`../TOOLS.md`](../TOOLS.md) | 도구 명령과 API |
 | [`agent/WORKFLOW.md`](agent/WORKFLOW.md) | quick/visual/final 게이트의 의미 |
 | [`agent/LOD_AUTO.md`](agent/LOD_AUTO.md) | main에서 LOD1/LOD2 후보 생성과 빠른 검사 |
+| [`agent/DEEPSEEK.md`](agent/DEEPSEEK.md) | DeepSeek/Codex 모델·추론 정책 |
 | [`../README.md`](../README.md) | 최종 보고와 게임 내 확인 항목 |
 
 ## 역사·제안
 
-현재 명세가 아닙니다. 실행 전에는 `docs/agent/`와 `TOOLS_CLAUDE.md`를 기준으로 합니다.
+현재 명세가 아닙니다. 실행 전에는 `docs/agent/`와 `TOOLS.md`를 기준으로 합니다.
 
 | 문서 | 내용 |
 |---|---|

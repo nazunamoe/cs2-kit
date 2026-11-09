@@ -84,6 +84,17 @@ python tools/band_scan.py --refs photo_refs.json --name 101_p1_1 --fh 2.9 --out 
 부족한 이유, 평면별 해상도(px/m)를 한눈에 볼 수 있습니다. 창 폭을 읽으려면 20 px/m 이상이
 필요하므로, 낮게 나오면 캡처 폭을 키워 재캡쳐해야 합니다(리샘플로 늘려도 정보는 안 늘어납니다).
 
+### 사진 준비와 보조 도구
+
+| 도구 | 쓰는 때 |
+|---|---|
+| `tools/photo_quality.py --dir photos` | 캡처·추출 사진의 블러·해상도·중복·노출 점검 ([PHOTO_QUALITY](docs/agent/PHOTO_QUALITY.md)) |
+| `tools/video_frames.py` | 영상 답사에서 프레임 추출, 사진처럼 refs에 등록 ([VIDEO_FRAMES](docs/agent/VIDEO_FRAMES.md)) |
+| `tools/crop_360.py` | 360/equirectangular 사진을 원근 크롭 ([PANORAMA_360](docs/agent/PANORAMA_360.md)) |
+| `tools/ifc_to_glb.py --check` | IFC·CAD를 GLB로 변환하는 경로 확인 ([IFC_TO_GLB](docs/agent/IFC_TO_GLB.md)) |
+| `tools/xrx_mass.py` | VR 메타(`data.xrx.json`)만으로 매스 초안 ([XRX_MASS](docs/agent/XRX_MASS.md)) |
+| `tools/lod_auto.py --asset output/<asset>` | main에서 LOD1/LOD2 후보 생성 ([LOD_AUTO](docs/agent/LOD_AUTO.md)) |
+
 사진 캡처 없이 `data.xrx.json`만 있으면 동별 매스 초안을 만들 수 있습니다.
 
 ```bash
