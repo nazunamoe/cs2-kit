@@ -40,6 +40,8 @@ The project contains `TASK.md`, `STATUS.md`, `photos/`, and a copied generator. 
 
 Optional Naver VR capture also needs `pip install playwright` and Chrome running with remote debugging port 9222. See `docs/agent/NAVER_VR.md`; Blender is not used for VR capture or `make_refs`.
 
+IFC conversion needs BlenderBIM/Bonsai, IfcConvert or FreeCAD; `tools/ifc_to_glb.py --check` reports what is available. See `docs/agent/IFC_TO_GLB.md`.
+
 ## Upgrade
 
 Overwrite kit files with the new distribution. Keep `projects/` and `memory/`; they contain user work and are not part of the base distribution. Back them up before major upgrades.
