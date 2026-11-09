@@ -20,14 +20,15 @@ sys.path.insert(0, HERE)
 import proj  # noqa: E402  (consumes --project and chdirs to the project)
 
 
-BLENDER_SCRIPT = r'''import bpy, json, os, sys
+BLENDER_SCRIPT = r'''import bpy, bmesh, json, os, sys
 
 def arg(i):
     argv = sys.argv
     rest = argv[argv.index("--") + 1:] if "--" in argv else []
     return rest[i]
 
-src, out, name, cand, lod1_ratio, lod2_tris = arg(0), arg(1), arg(2), arg(3), float(arg(4)), int(arg(5))
+src, out, name, cand, lod1_ratio, lod2_tris, cap_bottom = (
+    arg(0), arg(1), arg(2), arg(3), float(arg(4)), int(arg(5)), arg(6) == "1")
 bpy.ops.wm.open_mainfile(filepath=src)
 
 def tri_count(ob):
@@ -49,9 +50,37 @@ if old_main and old_main is not main:
     bpy.data.objects.remove(old_main, do_unlink=True)
 main.name = cand
 main.data.name = cand
+
+# keep the window meshes under the candidate name so lod_check does not pick a stale _Win as the base
+for suffix in ("", "_LOD1", "_LOD2"):
+    old = bpy.data.objects.get(name + suffix + "_Win")
+    if old is None:
+        continue
+    win = old.copy()
+    win.data = old.data.copy()
+    win.name = cand + suffix + "_Win"
+    win.data.name = cand + suffix + "_Win"
+    for coll in old.users_collection:
+        coll.objects.link(win)
+    bpy.data.objects.remove(old, do_unlink=True)
+
 main_tris = tri_count(main)
 if main_tris < 3:
     raise SystemExit("main mesh has too few triangles")
+
+capped = 0
+if cap_bottom:
+    bm = bmesh.new()
+    bm.from_mesh(main.data)
+    zmin = min(v.co.z for v in bm.verts)
+    edges = [e for e in bm.edges if e.is_boundary and all(abs(v.co.z - zmin) < 1e-3 for v in e.verts)]
+    if edges:
+        capped = len(edges)
+        bmesh.ops.holes_fill(bm, edges=edges, sides=0)
+        bm.to_mesh(main.data)
+        main.data.update()
+    bm.free()
+main_tris = tri_count(main)
 
 def make_lod(suffix, ratio):
     dup = main.copy()
@@ -76,6 +105,7 @@ os.makedirs(os.path.dirname(os.path.abspath(out)) or ".", exist_ok=True)
 bpy.ops.wm.save_as_mainfile(filepath=out, copy=True)
 result = {"main_tris": main_tris, "lod1_tris": tri_count(lod1), "lod2_tris": tri_count(lod2),
           "lod1_ratio": lod1_ratio, "lod2_target": lod2_tris, "out": out,
+          "capped_edges": capped,
           "objects": [cand, cand + "_LOD1", cand + "_LOD2"]}
 print("LOD_AUTO_DONE " + json.dumps(result))
 '''
@@ -137,6 +167,7 @@ def main():
     ap.add_argument("--blender", default="", help="Blender executable")
     ap.add_argument("--check", action="store_true", help="run lod_check --quick on the candidate")
     ap.add_argument("--check-full", action="store_true", help="run the full 64-view lod_check")
+    ap.add_argument("--no-cap-bottom", action="store_true", help="do not fill open bottom boundary loops")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
 
@@ -160,7 +191,8 @@ def main():
         script = f.name
     try:
         cmd = [blender, "--background", "--factory-startup", "--python", script, "--",
-               src, out_blend, name, cand, str(a.lod1_ratio), str(a.lod2_tris)]
+               src, out_blend, name, cand, str(a.lod1_ratio), str(a.lod2_tris),
+               "0" if a.no_cap_bottom else "1"]
         run = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     finally:
         try:
@@ -174,7 +206,7 @@ def main():
     result = json.loads(marker[-1][len("LOD_AUTO_DONE "):])
     result.update({"status": "OK", "source": display_path(src),
                    "candidate": display_path(out_blend),
-                   "blender": blender})
+                   "blender": blender, "cap_bottom": not a.no_cap_bottom})
     if result["lod1_tris"] >= result["main_tris"] * 0.5:
         result["status"] = "WARN"
         result["warning"] = "LOD1 is not below 50% of main"

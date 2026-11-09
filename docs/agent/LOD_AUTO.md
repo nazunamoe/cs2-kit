@@ -26,7 +26,12 @@ output/<asset>/_lod_auto/<asset>_lod_auto.blend
 
 - `--out`: 후보 폴더. 기본은 `<asset 폴더>/_lod_auto`.
 - `--blender`: Blender 실행 파일. 기본은 `tools/blender_path.txt` 또는 자동 탐색.
+- `--no-cap-bottom`: 열린 바닥 경계 루프를 채우지 않습니다. 기본은 자동으로 채웁니다.
 - `--json`: 요약 JSON 출력.
+
+## 열린 바닥
+
+킷의 main 메시는 바닥면이 없는 경우가 많아 Decimate가 큰 구멍을 만들 수 있습니다. `lod_auto`는 기본적으로 **z 최솟값의 열린 경계 루프를 채운 뒤** LOD를 만듭니다(`capped_edges`에 채운 변 수 기록). 그래도 창·얇은 난간처럼 별도 메시인 부품은 후보에 포함되지 않으므로, 최종 LOD는 생성기에서 만들어야 합니다.
 
 ## 한계
 
@@ -43,4 +48,4 @@ output/<asset>/_lod_auto/<asset>_lod_auto.blend
 - LOD2: 474 tris (500 이하)
 - `lod_check --quick`: main/LOD1/LOD2 모두 0.000% 구멍, 16/16 뷰 통과
 
-실제 건물에서는 이 결과를 그대로 PASS로 보지 말고 전체 LOD 검사와 게임 내 확인을 거쳐야 합니다.
+실제 101동 blend에서는 바닥 캡으로 95% 구멍 문제는 사라졌지만, Decimate 후보가 main 0.83%, LOD2 29% 구멍으로 **WARN**이었습니다. 이 후보는 사용하지 않았고 생성기 LOD를 사용했습니다. 실제 건물에서는 이 결과를 그대로 PASS로 보지 말고 전체 LOD 검사와 게임 내 확인을 거쳐야 합니다.
