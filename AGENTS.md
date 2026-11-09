@@ -90,7 +90,9 @@ Before reporting a tower or revising a first-pass build, in this order:
 3. Compare the same camera: photo vs model (`cmp_cam`), scan vs model (`pair_ortho`), and zoom 2x on small details. Re-run `final` before `pair_ortho` (visual-only builds give mismatched textures).
 4. Apply a user instruction ("no entrances", "same windows") to every instance at once, left and right, all faces.
 5. Windows within 0.05 m of a wall-piece end silently vanish; check counts after adding windows.
-6. Run `lod_check` and record the image review before any PASS report. Put building-specific numbers in the project `shape_notes.md`, generalizable lessons in `memory/LESSONS.md`.
+6. An entrance is not just a door: from a close, frontal photo list every element (recess, frame/lintel, canopy or porch, glazing split, windows above, step/threshold, side fixtures) and model that set. Check what the model actually shows (same-camera render) before saying it exists.
+7. Place a photo pixel in the model with a ray cast (Blender BVH) before editing: it gives the face, its normal (which part/face type) and the coordinate.
+8. Run `lod_check` and record the image review before any PASS report. Put building-specific numbers in the project `shape_notes.md`, generalizable lessons in `memory/LESSONS.md`.
 
 ## Final report
 
