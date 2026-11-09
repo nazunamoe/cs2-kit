@@ -243,7 +243,9 @@ def main():
         else:
             preview_status = "PASS"
             hist = save_progress(prev, asset, ok, len(r["errors"]), a.label)
-            print(f"[3/3 preview] {os.path.relpath(prev, ROOT)}  (history: {os.path.relpath(hist, ROOT)})")
+            cached = "cached" in log
+            print(f"[3/3 preview] {os.path.relpath(prev, ROOT)}  (history: {os.path.relpath(hist, ROOT)}"
+                  + (", render cache hit)" if cached else ")"))
 
     refs_exist = os.path.exists(os.path.join(ROOT, "photo_refs.json"))
     mism = None

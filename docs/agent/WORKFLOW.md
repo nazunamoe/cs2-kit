@@ -76,7 +76,13 @@ A final strict run requires Blender, FBX, executed photo/tile checks when refs e
 
 ## 5. Resume and retry limits
 
-`work/agent_state.json` stores generator/preview hashes, last gate, next action, stable mismatch IDs/count, and review artifacts. `STATUS.md` is its short human summary. Read these instead of replaying old conversations.
+`work/agent_state.json` stores generator/preview hashes, last gate, next action, stable mismatch IDs/count, and review artifacts. `work/state.yaml` projects the same run into per-stage records (`quick`, `windows`, `final`, `fix`) with gate status and artifact hashes, so a later run can see which stage produced which preview/FBX. Read these instead of replaying old conversations; `work/state.yaml` is a projection, not the gate authority.
+
+```bash
+python tools/state.py --project P --json
+```
+
+A failing gate also writes `work/logs/builder_brief.md`: a deterministic grouping of the failed checks into `build`, `geometry`, `texture`, `lod`, `photo_match`, or `gate`, with the first structured errors. Use it to brief the builder; it does not replace reading the gate JSON and the listed artifacts.
 
 Do not repeat an unchanged failing command. After three attempts with the same wall+metric mismatch, the agent returns `NEEDS_HUMAN_REVIEW` instead of another visual loop. Record evidence and reasons in `building_spec_<Name>.yaml` under `photo_mismatch_notes`.
 
