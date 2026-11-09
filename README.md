@@ -135,7 +135,7 @@ python tools/style_catalog.py --project my-apt --json
 | 드론·360 사진 | 부분 지원 | 드론 사진은 일반 사진처럼 씁니다. 360/equirectangular는 `tools/crop_360.py`로 원근 크롭한 뒤 넣습니다. |
 | IFC·CAD·BIM | 변환 필요 | 키트는 IFC/DWG를 직접 읽지 않습니다. GLB나 OBJ로 내보낸 뒤 `glb-mass`를 씁니다. |
 | 다른 3D 에셋 | 매스 참고만 | GLB로 가져와 매스만 단순화합니다. 원본 메시·텍스처는 에셋에 복사하지 않습니다. |
-| 영상 워크스루 | 수동 | 프레임을 추출해 사진으로 넣습니다. 자동 추출·정합은 없습니다. |
+| 영상 워크스루 | 부분 지원 | `tools/video_frames.py`로 프레임을 추출해 사진으로 넣습니다. 자동 정합은 없습니다. |
 
 드론·360 사진은 원근 크롭 후 일반 사진과 같은 경로를 씁니다.
 
@@ -145,6 +145,15 @@ python tools/crop_360.py --project my-apt --image photos/pano.jpg \
 ```
 
 360 사진의 yaw 규칙과 한계는 [360 사진 원근 크롭](docs/agent/PANORAMA_360.md)을 참고하세요.
+
+영상은 프레임으로 뽑아 같은 사진 경로에 넣습니다.
+
+```bash
+python tools/video_frames.py --project my-apt --video photos/walk.mp4 \
+  --every 2.0 --width 1600 --out photos/frames
+```
+
+ffmpeg가 없으면 `pip install imageio-ffmpeg`로 설치합니다. 구간·장수·품질 옵션은 [영상 프레임 추출](docs/agent/VIDEO_FRAMES.md)을 참고하세요.
 
 ### 상가·학교·비정형 건축물
 
@@ -265,6 +274,7 @@ python tools/agent.py fix --project my-apt --generator my_apt_cs2.py --finish --
 - [GLB 없는 사진 증거 작업](docs/agent/PHOTO_ONLY.md)
 - [파사드 스타일과 브리프](templates/styles/README.md)
 - [360 사진 원근 크롭](docs/agent/PANORAMA_360.md)
+- [영상 프레임 추출](docs/agent/VIDEO_FRAMES.md)
 - [상가·학교·비정형 볼륨](docs/agent/VOLUMES.md)
 - [메모리 범위](docs/agent/MEMORY.md)
 
