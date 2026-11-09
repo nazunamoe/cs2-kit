@@ -91,6 +91,14 @@ For complex tasks, consult the advisor before committing to an approach, when an
 - If the tool is unavailable, launch the read-only `advisor` subagent and pass a compact summary: goal, attempts, errors, changed files.
 - The advisor cannot edit files or run commands. Treat its output as advice, not as verified fact.
 
+Before reporting a tower or revising a first-pass build, in this order:
+1. Verify floor count and roof heights from scan orthographic tops (`pair_ortho` views 0/180/90, ±0.1 m); convert frame z to generator z.
+2. Compare sibling/twin towers' zone lists for missing pieces (parapets, roof boxes) before measuring anything new.
+3. Compare the same camera: photo vs model (`cmp_cam`), scan vs model (`pair_ortho`), and zoom 2x on small details.
+4. Apply a user instruction ("no entrances", "same windows") to every instance at once, left and right, all faces.
+5. Windows within 0.05 m of a wall-piece end silently vanish; check counts after adding windows.
+6. Run `lod_check` and record the image review before any PASS report.
+
 ## Final report
 
 Report files, exact gate/check statuses, warnings, FBX status, estimated values, remaining photo/tile issues and reasons, and in-game checks: real scale, window grid, alpha, flicker, night lights, front direction, colors, entrance, and signature registration.
