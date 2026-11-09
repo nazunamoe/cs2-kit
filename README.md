@@ -1,6 +1,6 @@
 # CS2 건축 에셋 키트 — Claude Code
 
-사진과 건축 정보로 Cities: Skylines II 건축 에셋을 만드는 키트입니다. 이 브랜치는 **Claude Code 전용 스킬과 훅**을 제공하며, 모든 작업이 같은 검증 엔진과 상태 파일을 공유합니다.
+사진, GLB 스캔, 자연어 설명으로 Cities: Skylines II 건축 에셋을 만드는 키트입니다. 이 브랜치는 **Claude Code 전용 스킬과 훅**을 제공하며, 모든 작업이 같은 검증 엔진과 상태 파일을 공유합니다.
 
 ## 1. 준비
 
@@ -41,6 +41,18 @@ python tools/project.py new my-building --template generic
 1. `photos/`에 참고 사진과 선택적 GLB를 넣습니다.
 2. `TASK.md`에 아는 정보를 적고, 모르는 값은 비워 둡니다.
 3. 실제 단지 이름·브랜드·로고는 에셋 이름과 텍스처에 사용하지 않습니다.
+
+### 작업 방법 선택
+
+입력이 무엇이냐에 따라 시작점이 다릅니다. 아래 세 가지가 기본 경로입니다.
+
+| 방법 | 준비물 | 강점 | 시작 명령 |
+|---|---|---|---|
+| 1. 네이버 VR + GLB | 투어 URL, 선택적 `3dview.glb` | 여러 동·다면 사진, camera·평면 메타, 매스 자동 재구성 | `capture/naver_vr.py auto` → `agent.py glb-mass` |
+| 2. 로드뷰·직접 촬영 | 정면·모서리·디테일 3~8장 | 실제 색·재질·창·저층부·입구 | `agent.py evidence`, `agent.py observe` |
+| 3. 자연어 + 사진 | 시대·유형·층수 설명 + 사진 | 빠른 스타일·층수·창 계열 초안 | `tools/brief.py` |
+
+세 방법 모두 같은 quick/visual/final 게이트를 통과해야 합니다. 사진 증거가 없는 항목은 `NOT_APPLICABLE`로 남고 PASS로 바뀌지 않습니다.
 
 ### GLB가 있으면 매스부터 자동 재구성
 
@@ -98,6 +110,41 @@ python tools/agent.py evidence --project my-apt --json -- validate
 벽의 `normal_deg`에서 비축정렬 벽의 카메라 yaw를 계산하고, pivot shift를 적용합니다. 따라서 돌출되거나 들어간 벽도 전체 건축물 크기가 아닌 실제 벽 영역으로 비교합니다. 저신뢰도 사진이나 약한 패턴은 자동 층수 변경 지시를 만들지 않습니다.
 
 단독 정면 사진으로 깊이와 가려진 형상을 확정할 수는 없습니다. 이런 값은 추정치로 남기고, 가능하면 사선 사진이나 다른 각도로 검증합니다.
+
+### 자연어 설명과 스타일
+
+층수·시대·유형·창 계열처럼 반복되는 결정은 짧은 설명으로 초안을 만들 수 있습니다.
+
+```bash
+python tools/brief.py --project my-apt --text "2020년대 타워형 아파트 36층, 확장형, 입면분할창" --json
+python tools/style_catalog.py --project my-apt --json
+```
+
+`brief.py`는 `templates/styles/*.yaml`에서 스타일을 고르고 `building_brief.yaml`을 만듭니다. 팔레트, 창 치수, 띠·스팬드럴, 야간 점등 정책이 여기에 들어가며, 생성기는 `templates/facade_style.py`로 같은 값을 읽습니다.
+
+`brief.py`는 결정론적 파서이지 LLM 호출이 아닙니다. 문장에 없는 값과 층수 기본값은 `estimated`로 표시하고, 자연어만으로는 평면 형상·베이 수·안 보이는 면을 확정하지 않습니다. 매스는 GLB나 실측 치수로 먼저 잡고, 창 위치·입구·저층부는 사진과 `work/photo_evidence.json`으로 보정합니다.
+
+### 그 외 입력 방법
+
+| 입력 | 지원 | 용도와 한계 |
+|---|---|---|
+| GLB 스캔만 (사진 없이) | 지원 | `glb-mass`로 매스·평면·단차를 잡고 스타일 프리셋으로 입면을 채웁니다. 사진 대조는 `NOT_APPLICABLE`입니다. |
+| 위성·평면 이미지 | 지원 | `photo_refs.json`의 `satellite`로 지붕 형상과 가로·세로 비율을 비교합니다. 입면 증거는 아닙니다. |
+| 도면·치수 텍스트 | 지원 | `TASK.md`와 `generic_spec.json`에 직접 적습니다. 창·재질은 사진이나 스타일로 보완합니다. |
+| 자연어만 (사진 없음) | 부분 지원 | 스타일·층수 초안은 나오지만 베이·입구·색은 추정입니다. 사진 게이트는 비어 있습니다. |
+| 드론·360 사진 | 부분 지원 | 드론 사진은 일반 사진처럼 씁니다. 360/equirectangular는 `tools/crop_360.py`로 원근 크롭한 뒤 넣습니다. |
+| IFC·CAD·BIM | 변환 필요 | 키트는 IFC/DWG를 직접 읽지 않습니다. GLB나 OBJ로 내보낸 뒤 `glb-mass`를 씁니다. |
+| 다른 3D 에셋 | 매스 참고만 | GLB로 가져와 매스만 단순화합니다. 원본 메시·텍스처는 에셋에 복사하지 않습니다. |
+| 영상 워크스루 | 수동 | 프레임을 추출해 사진으로 넣습니다. 자동 추출·정합은 없습니다. |
+
+드론·360 사진은 원근 크롭 후 일반 사진과 같은 경로를 씁니다.
+
+```bash
+python tools/crop_360.py --project my-apt --image photos/pano.jpg \
+  --yaws 0,90,180,270 --fov 90 --out photos/crops
+```
+
+360 사진의 yaw 규칙과 한계는 [360 사진 원근 크롭](docs/agent/PANORAMA_360.md)을 참고하세요.
 
 ### 상가·학교·비정형 건축물
 
@@ -214,7 +261,10 @@ python tools/agent.py fix --project my-apt --generator my_apt_cs2.py --finish --
 - [도구와 API](TOOLS_CLAUDE.md)
 - [상세 모델링 지침](docs/agent/MODELING.md)
 - [GLB 기반 매스 재구성](docs/agent/GLB_MASS.md)
+- [네이버 VR 캡처와 도색 refs](docs/agent/NAVER_VR.md)
 - [GLB 없는 사진 증거 작업](docs/agent/PHOTO_ONLY.md)
+- [파사드 스타일과 브리프](templates/styles/README.md)
+- [360 사진 원근 크롭](docs/agent/PANORAMA_360.md)
 - [상가·학교·비정형 볼륨](docs/agent/VOLUMES.md)
 - [메모리 범위](docs/agent/MEMORY.md)
 
