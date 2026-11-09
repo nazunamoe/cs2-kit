@@ -12,6 +12,8 @@ import sys
 EXPLICIT_PROJECT = any(a == "--project" or a.startswith("--project=") for a in sys.argv[1:])
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from proj import ROOT, KIT, NAME  # noqa: E402
+import state as project_state  # noqa: E402  (work/state.yaml projection)
+from agent_actions import classify_gate  # noqa: E402
 
 PY = sys.executable
 STATE = os.path.join(ROOT, "work", "agent_state.json")
@@ -91,6 +93,22 @@ def review_command(gate):
     artifacts = list(dict.fromkeys(path.replace(os.sep, "/") for path in artifacts))
     cmd = f"python tools/agent.py review --project {NAME} --status PASS --note \"reviewed current artifacts\""
     return cmd + "".join(f" --artifact \"{path}\"" for path in artifacts)
+
+
+def builder_brief(gate, status):
+    """Write a compact builder brief for a failing gate and return its summary."""
+    if not gate or status == "PASS":
+        return None
+    info = classify_gate(gate)
+    path = os.path.join(ROOT, "work", "logs", "builder_brief.md")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(info["brief"].rstrip() + "\n")
+        info["path"] = os.path.relpath(path, ROOT).replace(os.sep, "/")
+    except OSError as ex:  # noqa: BLE001 - a brief is advisory
+        sys.stderr.write("[brief] write failed: %s\n" % ex)
+    return info
 
 
 def next_for(status, generator, mode="quick"):
@@ -214,17 +232,23 @@ def normalized_cycle(args):
         elif visual_pending:
             next_action = {"command": review_command(gate),
                            "reason": "inspect the listed current artifacts, then record the review"}
+        brief = builder_brief(gate, status)
         state.update({
             "current_stage": f"{args.mode}:{status}", "generator": os.path.relpath(generator, ROOT),
             "generator_hash": gen_hash, "current_preview_hash": preview_hash,
             "last_gate": gate, "mismatch_attempts": attempts, "next_action": next_action,
         })
         save_state(state)
+        try:
+            project_state.sync(state, gate, args.label or args.mode)
+        except OSError as ex:  # noqa: BLE001 - the projection must not decide the gate
+            sys.stderr.write("[state] write failed: %s\n" % ex)
         result = {
             "status": status, "project": NAME, "asset": gate.get("asset"), "checks": gate.get("checks", {}),
             "errors": gate.get("errors", []), "warnings": (gate.get("check") or {}).get("warnings", []),
             "photo_mismatch": (gate.get("photo") or {}).get("mismatch"),
             "action_tags": (gate.get("agent") or {}).get("action_tags", []), "next_action": state["next_action"],
+            "builder_brief": brief,
             "gate": gate_path, "state": os.path.relpath(STATE, ROOT), "log": os.path.relpath(log_path, ROOT),
         }
         if args.jsonl:
@@ -247,7 +271,8 @@ def normalized_cycle(args):
             result = {"status": status, "project": NAME, "mode": args.mode, "next_action": state["next_action"]}
             if status != "PASS":
                 result.update(checks=gate.get("checks", {}), gate=gate_path,
-                              photo_mismatch=(gate.get("photo") or {}).get("mismatch"))
+                              photo_mismatch=(gate.get("photo") or {}).get("mismatch"),
+                              builder_brief=brief)
                 errors = gate.get("errors", [])
                 if errors:
                     first = errors[0]
@@ -315,7 +340,9 @@ def resume(args):
           "current_stage": state.get("current_stage"), "generator": state.get("generator"),
           "visual_review": state.get("visual_review", "NOT_CHECKED"),
           "mismatch_attempts": state.get("mismatch_attempts", {}), "next_action": state.get("next_action"),
-          "state": os.path.relpath(STATE, ROOT)}, args.json)
+          "state": os.path.relpath(STATE, ROOT),
+          "state_yaml": project_state.STATE_NAME,
+          "stages": project_state.summary().get("stages", {})}, args.json)
 
 
 def photos(args):
@@ -536,8 +563,14 @@ def fix(args):
                                     "reason": "inspect the listed fix artifacts and compare result, then record the review"}
         state.pop("fix", None)
         save_state(state)
+        try:
+            project_state.sync(state, gate or state.get("last_gate"), "fix")
+        except OSError as ex:  # noqa: BLE001
+            sys.stderr.write("[state] write failed: %s\n" % ex)
+        brief = builder_brief(gate or state.get("last_gate"), status)
         emit({"status": status, "checks": (gate or {}).get("checks", {}),
               "compare": {"status": compare_status, "output": diff_log.splitlines()[-30:]},
+              "builder_brief": brief,
               "cycle_output": log.splitlines()[-30:], "next_action": state["next_action"]}, args.json,
              0 if status == "PASS" else 1 if status == "FAIL" else 2)
 
