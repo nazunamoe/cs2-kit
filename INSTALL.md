@@ -42,6 +42,8 @@ Optional Naver VR capture also needs `pip install playwright` and Chrome running
 
 IFC conversion needs BlenderBIM/Bonsai, IfcConvert or FreeCAD; `tools/ifc_to_glb.py --check` reports what is available. See `docs/agent/IFC_TO_GLB.md`.
 
+Optional video frame extraction needs ffmpeg on PATH or `pip install imageio-ffmpeg`. See `docs/agent/VIDEO_FRAMES.md`.
+
 ## Upgrade
 
 Overwrite kit files with the new distribution. Keep `projects/` and `memory/`; they contain user work and are not part of the base distribution. Back them up before major upgrades.
