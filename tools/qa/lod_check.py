@@ -146,6 +146,19 @@ for name, missing in (("BaselineClosed", False), ("BaselineOpen", True)):
     sys.exit(0 if passed else 1)
 
 
+def print_where(p, shift):
+    """One hole spot: the BACK face seen through the hole (gen = exported xyz - pivot_shift), then the nearest front faces around the
+    hole = candidates for the missing wall. gap = screen distance (m) from the hole to that face's outline; two faces with a tiny gap
+    on both sides mean a seam, one face ending beside the hole means a ray slipped past its end."""
+    gx = [p["xyz"][0] - shift[0], p["xyz"][1] - shift[1], p["xyz"][2]]
+    side = " (back face: the ray entered through an opening or a seam)" if p.get("back_face") else ""
+    print(f"      at gen ({gx[0]:.2f}, {gx[1]:.2f}, {gx[2]:.2f})  normal {tuple(p['normal'])}  {p['px']} px  [{p['obj']}]{side}")
+    for q in p.get("near", []):
+        lo = (q["lo"][0] - shift[0], q["lo"][1] - shift[1], q["lo"][2])
+        hi = (q["hi"][0] - shift[0], q["hi"][1] - shift[1], q["hi"][2])
+        print(f"        near front face normal {tuple(q['normal'])} gap {q['gap']:.2f} m  gen ({lo[0]:.2f},{lo[1]:.2f},{lo[2]:.2f})..({hi[0]:.2f},{hi[1]:.2f},{hi[2]:.2f})  {q['tris']} tris")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("asset", nargs="?", help="output/<asset> (폴더) 또는 .blend")
@@ -207,14 +220,11 @@ def main():
         for x in sorted(bad, key=lambda x: -x["hole_pct"])[:6]:
             print(f"  HOLE {g} az {x['az']:5.1f} el {x['el']:+5.1f}  {x['hole_pct']:.3f}%  ({x['hole_px']} px)")
             for p in x.get("where", []):
-                # 비쳐 보이는 뒷면의 위치: 내보낸 좌표(xyz)와 생성기 좌표(gen = xyz - pivot_shift), 그 면의 법선
-                gx = [p["xyz"][0] - shift[0], p["xyz"][1] - shift[1], p["xyz"][2]]
-                print(f"      at gen ({gx[0]:.2f}, {gx[1]:.2f}, {gx[2]:.2f})  normal {tuple(p['normal'])}  {p['px']} px  [{p['obj']}]")
+                print_where(p, shift)
         for x in sorted(small, key=lambda x: -x["hole_pct"])[:3]:
             print(f"  HOLE_SMALL {g} az {x['az']:5.1f} el {x['el']:+5.1f}  {x['hole_pct']:.3f}%  ({x['hole_px']} px)")
             for p in x.get("where", []):
-                gx = [p["xyz"][0] - shift[0], p["xyz"][1] - shift[1], p["xyz"][2]]
-                print(f"      at gen ({gx[0]:.2f}, {gx[1]:.2f}, {gx[2]:.2f})  normal {tuple(p['normal'])}  {p['px']} px  [{p['obj']}]")
+                print_where(p, shift)
     # 텍스처: 게임은 메시 이름으로 <메시>_<맵>.png 를 찾는다. LOD 에 자기 이름의 맵이 없으면 유리처럼(투명) 그려진다
     # (사용자 확인: 키트가 LOD1 맵을 안 만들어 중간 거리에서 벽이 비친 적이 있음)
     adir = os.path.dirname(path)

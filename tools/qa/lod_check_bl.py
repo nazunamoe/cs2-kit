@@ -87,8 +87,64 @@ def render_mask(objs, path, cull=True, ground_vis=True):
     return px > 0.5
 
 
+_TRI = {}
+
+
+def _tri_arrays(o):
+    """(world triangle corners (T, 3, 3), world triangle normals (T, 3)) of one mesh object, cached"""
+    if o.name not in _TRI:
+        me = o.data
+        me.calc_loop_triangles()
+        t = len(me.loop_triangles)
+        idx = np.empty(t * 3, np.int32)
+        me.loop_triangles.foreach_get("vertices", idx)
+        co = np.empty(len(me.vertices) * 3, np.float32)
+        me.vertices.foreach_get("co", co)
+        nrm = np.empty(t * 3, np.float32)
+        me.loop_triangles.foreach_get("normal", nrm)
+        m = np.array(o.matrix_world, dtype=np.float64)
+        w = co.reshape(-1, 3).astype(np.float64) @ m[:3, :3].T + m[:3, 3]
+        n_w = nrm.reshape(-1, 3).astype(np.float64) @ m[:3, :3].T
+        n_w /= np.maximum(np.linalg.norm(n_w, axis=1, keepdims=True), 1e-12)
+        _TRI[o.name] = (w[idx.reshape(t, 3)], n_w)
+    return _TRI[o.name]
+
+
+def near_faces(objs, d, right, up, sx, sy, tol=0.3, k=3):
+    """Front faces (normal toward the camera) whose outline passes within tol metres of the hole's screen point (sx, sy).
+    The first ray hit (`where`) is the BACK face seen through the hole; the missing wall is among these: when two of them nearly
+    touch at the hole, it is a seam between pieces; when one ends right beside the hole, a ray slipped past its end."""
+    dn, rn, un = np.array(d, dtype=np.float64), np.array(right, dtype=np.float64), np.array(up, dtype=np.float64)
+    cl = np.array(cam.location, dtype=np.float64)
+    groups_ = {}
+    for o in objs:
+        tri, n_w = _tri_arrays(o)
+        face = n_w @ dn > 0.02
+        if not face.any():
+            continue
+        t, nf = tri[face], n_w[face]
+        rel = t - cl
+        s = np.stack([rel @ rn, rel @ un], axis=-1)                    # (F, 3, 2) screen coordinates
+        lo, hi = s.min(axis=1), s.max(axis=1)
+        dx = np.maximum(np.maximum(lo[:, 0] - sx, 0.0), sx - hi[:, 0])
+        dy = np.maximum(np.maximum(lo[:, 1] - sy, 0.0), sy - hi[:, 1])
+        dist = np.hypot(dx, dy)
+        for i in np.nonzero(dist < tol)[0]:
+            key = (o.name, tuple(np.round(nf[i], 2)))
+            g = groups_.setdefault(key, dict(dist=1e9, lo=np.full(3, 1e9), hi=np.full(3, -1e9), tris=0))
+            g["dist"] = min(g["dist"], float(dist[i]))
+            g["lo"] = np.minimum(g["lo"], t[i].min(axis=0))
+            g["hi"] = np.maximum(g["hi"], t[i].max(axis=0))
+            g["tris"] += 1
+    best = sorted(groups_.items(), key=lambda kv: (kv[1]["dist"], -kv[1]["tris"]))[:k]
+    return [dict(obj=key[0], normal=[round(float(c), 2) for c in key[1]], gap=round(g["dist"], 3),
+                 lo=[round(float(c), 2) for c in g["lo"]], hi=[round(float(c), 2) for c in g["hi"]], tris=g["tris"])
+            for key, g in best]
+
+
 def locate(objs, hole, d, n=4):
-    """구멍 픽셀 덩어리(16 px 칸) 큰 것 n 개: 그 픽셀로 광선을 쏴 처음 맞는 면(= 비쳐 보이는 뒷면)의 위치·법선·객체"""
+    """구멍 픽셀 덩어리(16 px 칸) 큰 것 n 개: 그 픽셀로 광선을 쏴 처음 맞는 면(= 비쳐 보이는 뒷면)의 위치·법선·객체,
+    그리고 그 구멍 바로 앞에서 카메라를 향한 가장 가까운 면들(near = 뚫려 있는 벽 후보)"""
     rr, cc = np.nonzero(hole)
     if not len(rr):
         return []
@@ -112,7 +168,8 @@ def locate(objs, hole, d, n=4):
                     best = (dist, wl, (o.matrix_world.to_3x3() @ nrm).normalized(), o.name)
         if best:
             out.append(dict(px=len(pts_), xyz=[round(v_, 2) for v_ in best[1]], normal=[round(v_, 2) for v_ in best[2]],
-                            obj=best[3]))
+                            obj=best[3], back_face=bool(best[2].dot(d) < 0),
+                            near=near_faces(objs, d, right, up, u * cd.ortho_scale, v * cd.ortho_scale)))
     return out
 
 
