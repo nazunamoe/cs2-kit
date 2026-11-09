@@ -90,6 +90,11 @@ python tools/extract_texture.py photos/front.jpg --pts 812,402,1290,380,1302,905
 - `glb_measure.py scan.glb --list`, then `--mesh`/`--box`: overall dimensions and elevations.
 - `glb_slices.py`: individual wall segments from explicit GLB slices; v1.
 - `glb_shape.py` / `agent.py glb-mass`: multi-height outer footprints, simplified polygon volumes, automatic or explicit height tiers, source provenance, and a review preview. See `docs/agent/GLB_MASS.md`.
+- `xrx_mass.py --xrx photos/data.xrx.json --dongs 101`: draft a per-dong mass from Naver VR metadata only (no photo evidence). See `docs/agent/XRX_MASS.md`.
+- `photo_quality.py --dir photos`: blur, resolution, duplicate and exposure gate for reference images. See `docs/agent/PHOTO_QUALITY.md`.
+- `video_frames.py --video walk.mp4`: extract frames from a walkthrough video and add them as photos. See `docs/agent/VIDEO_FRAMES.md`.
+- `crop_360.py --image pan.jpg --yaws 0,90`: perspective crops from a 360/equirectangular photo. See `docs/agent/PANORAMA_360.md`.
+- `ifc_to_glb.py --check|--plan`: available IFC/BIM converters and the conversion route to GLB. See `docs/agent/IFC_TO_GLB.md`.
 - `lod_auto.py`: main `.blend`에서 LOD1/LOD2 후보를 만들고 `lod_check`로 구멍을 확인. 후보는 생성기 최종 LOD를 대체하지 않음. See `docs/agent/LOD_AUTO.md`.
 - `tools/photo_facade/`: one legacy generator structure only; do not use on unrelated generators.
 
