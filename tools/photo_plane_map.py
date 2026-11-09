@@ -1,0 +1,422 @@
+# -*- coding: utf-8 -*-
+"""
+photo_plane_map.py - map the photo planes of a capture onto the model walls they cover.
+
+A capture (Naver VR, 360 tour, ...) knows its own wall planes in scene metres, and the
+model (generic_spec*.json) knows its own wall ring in model metres.  Neither knows the
+other, so every measured photo has to be registered to the model before a window column
+measured on the photo can be placed on the model wall.
+
+    python tools/photo_plane_map.py --meta photos/ref101/101_meta.json \
+        --mass generic_spec_xrx.json [--refs photo_refs_stitched2.json] \
+        [--volume dong_101] [--min-len 6] [--min-px-per-m 15] \
+        [--out work/plane_to_edge.json] [--json]
+
+How it works
+    1. the capture footprint (meta["footprint_m"]) is registered onto the model ring with a
+       rigid transform (rotation + translation) found by a Chamfer search; the residual is
+       reported, because a large residual means the two outlines disagree.
+    2. every exact plane of the capture (naver_vr.reference_walls_of) is projected onto the
+       model ring: which model edge it covers, at which metre offset, and whether the photo
+       runs with or against the edge direction (a mirrored photo flips the window order).
+    3. the result is written as JSON and as a table:
+       plane 4 (grp 0, 9.54 m) -> model edge 0, photo left 9.55 m, right 0.01 m, 40 px/m
+
+Output (work/plane_to_edge.json):
+    {"registration": {...}, "model_edges": [...], "planes": [...], "warnings": [...]}
+
+Use it with facade_read.py output (columns in metres) to place measured columns, and with
+tools/qa/plane_compare.py to compare the model with the photo plane by plane.
+"""
+import argparse
+import json
+import math
+import os
+import sys
+
+import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from proj import ROOT, KIT, NAME  # noqa: E402,F401  (project folder; chdir done)
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+
+def p(s=""):
+    sys.stdout.write(str(s).encode("ascii", "backslashreplace").decode("ascii") + "\n")
+
+
+# ---------------------------------------------------------------- model ring
+def _dist(a, b):
+    return math.hypot(b[0] - a[0], b[1] - a[1])
+
+
+def simplify_ring(foot, min_len=2.0):
+    """Drop vertices that only create sliver walls (they show as LOD cracks)."""
+    pts = [tuple(float(q) for q in v) for v in foot]
+    changed = True
+    while changed and len(pts) > 4:
+        changed = False
+        n = len(pts)
+        for i in range(n):
+            a, b, c = pts[(i - 1) % n], pts[i], pts[(i + 1) % n]
+            if _dist(a, b) < min_len or _dist(b, c) < min_len:
+                pts.pop(i)
+                changed = True
+                break
+    return pts
+
+
+def pick_volume(spec, want=None):
+    vols = [v for v in spec.get("volumes", []) if v.get("footprint")]
+    if not vols:
+        raise SystemExit("no volume with a footprint in the mass file")
+    if want:
+        for v in vols:
+            if v.get("id") == want:
+                return v
+        raise SystemExit("volume '%s' not found (%s)" % (want, ", ".join(str(v.get("id")) for v in vols)))
+    if len(vols) == 1:
+        return vols[0]
+    best = max(vols, key=lambda v: len(v["footprint"]))
+    return best
+
+
+def polygon_area(pts):
+    a = np.asarray(pts, dtype=float)
+    x, y = a[:, 0], a[:, 1]
+    return 0.5 * abs(float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))
+
+
+# ---------------------------------------------------------------- registration
+def sample_polygon(poly, step=0.5):
+    out = []
+    n = len(poly)
+    for i in range(n):
+        a, b = poly[i], poly[(i + 1) % n]
+        L = math.hypot(b[0] - a[0], b[1] - a[1])
+        k = max(1, int(round(L / step)))
+        for j in range(k):
+            f = j / k
+            out.append((a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f))
+    return np.array(out, dtype=float)
+
+
+def chamfer(A, B):
+    """Mean distance from every point of A to its nearest point in B."""
+    if len(A) == 0 or len(B) == 0:
+        return float("inf")
+    tot = 0.0
+    for i in range(0, len(A), 512):
+        chunk = A[i:i + 512]
+        d = np.sqrt(((chunk[:, None, :] - B[None, :, :]) ** 2).sum(2))
+        tot += float(d.min(axis=1).sum())
+    return tot / len(A)
+
+
+def rot(theta):
+    c, s = math.cos(theta), math.sin(theta)
+    return np.array([[c, -s], [s, c]])
+
+
+def register(cap_pts, ring_pts, coarse_step=0.5, fine_step=0.05, search=1.5):
+    """Rigid transform (rotation + translation) that maps the capture outline onto the model ring."""
+    S_cap = sample_polygon(cap_pts, coarse_step)
+    S_model = sample_polygon(ring_pts, coarse_step)
+    best = None
+    for deg in np.arange(0.0, 360.0, 0.5):
+        R = rot(math.radians(float(deg)))
+        t = ring_pts.mean(0) - R @ cap_pts.mean(0)
+        d = chamfer((S_cap @ R.T) + t, S_model)
+        if best is None or d < best[0]:
+            best = (d, float(deg), R, t)
+    d, deg, R, t = best
+    bestt = None
+    for dx in np.arange(-search, search + 1e-9, fine_step):
+        for dy in np.arange(-search, search + 1e-9, fine_step):
+            tt = t + np.array([dx, dy])
+            dd = chamfer((S_cap @ R.T) + tt, S_model)
+            if bestt is None or dd < bestt[0]:
+                bestt = (dd, tt)
+    d, t = bestt
+    moved = (S_cap @ R.T) + t
+    res = np.sqrt(((S_model[:, None, :] - moved[None, :, :]) ** 2).sum(2)).min(axis=1)
+    info = {"rot_deg": round(deg, 3), "translation": [round(float(t[0]), 4), round(float(t[1]), 4)],
+            "chamfer_m": round(float(d), 4), "residual_mean_m": round(float(res.mean()), 4),
+            "residual_max_m": round(float(res.max()), 4)}
+    return R, t, info
+
+
+# ---------------------------------------------------------------- planes
+def capture_planes(meta):
+    """Exact planes of the capture (same code the Naver VR refs use)."""
+    sys.path.insert(0, os.path.join(KIT, "capture"))
+    try:
+        import naver_vr as NV
+    except Exception as ex:
+        raise SystemExit("capture/naver_vr.py is needed for the plane list (%s)" % ex)
+    return NV.reference_walls_of(meta.get("footprint_m") or [], meta.get("walls") or [],
+                                  min_len=1.0, angle_tol=2.0, offset_tol=0.05)
+
+
+def photo_left_is_p0(meta, plane, shot):
+    """Which plane endpoint appears on the left in the photo (that fixes the mirror direction)."""
+    sys.path.insert(0, os.path.join(KIT, "capture"))
+    import naver_vr as NV
+    g, roof = meta["ground_m"], meta["roof_m"]
+    box, dpr = meta["canvas_css"], meta["dpr"]
+    y = g + (roof - g) * 0.5
+    pa = NV.project_px(shot, [plane["p0"][0], y, plane["p0"][1]], box, dpr, shot["img"])
+    pb = NV.project_px(shot, [plane["p1"][0], y, plane["p1"][1]], box, dpr, shot["img"])
+    if not pa or not pb:
+        return None
+    return pa[0] < pb[0]
+
+
+def edge_coverage(ring, m0, m1, max_perp=1.5, min_overlap=0.5):
+    """Best model edge for the (already transformed) plane segment."""
+    best = None
+    n = len(ring)
+    for k in range(n):
+        ra, rb = ring[k], ring[(k + 1) % n]
+        d = rb - ra
+        Ld = float(np.linalg.norm(d))
+        if Ld < 1e-6:
+            continue
+        u = d / Ld
+        s0 = float(np.dot(m0 - ra, u))
+        s1 = float(np.dot(m1 - ra, u))
+        lo, hi = min(s0, s1), max(s0, s1)
+        perp = max(abs((m0[0] - ra[0]) * u[1] - (m0[1] - ra[1]) * u[0]),
+                   abs((m1[0] - ra[0]) * u[1] - (m1[1] - ra[1]) * u[0]))
+        overlap = min(hi, Ld) - max(lo, 0.0)
+        if perp <= max_perp and overlap >= min_overlap:
+            score = (round(perp, 3), -round(overlap, 3))
+            if best is None or score < best[0]:
+                best = (score, k, s0, s1, Ld, perp, overlap)
+    return best
+
+
+def refs_px_per_m(refs_path):
+    """px per metre of every plane that has a ref entry (image width / real width)."""
+    out = {}
+    if not refs_path or not os.path.isfile(refs_path):
+        return out
+    with open(refs_path, encoding="utf-8-sig") as f:
+        refs = json.load(f)
+    for e in refs.get("facades", []):
+        plane = e.get("source_plane_i")
+        if plane is None:
+            continue
+        path = e.get("file")
+        if not path or not os.path.isfile(path):
+            continue
+        try:
+            from PIL import Image
+            with Image.open(path) as im:
+                w = im.size[0]
+        except Exception:
+            continue
+        size = e.get("size_m") or []
+        if not size or not size[0]:
+            continue
+        ppm = w / float(size[0])
+        prev = out.get(plane)
+        if prev is None or ppm > prev:
+            out[plane] = ppm
+    return out
+
+
+def capture_px_per_m(meta, plane, shot):
+    """px per metre of the plane inside the capture photo (projected width / real width).
+
+    This is what limits measurement: a 35 m wall shot at 1366 px is only ~39 px/m, and a
+    facade that fills the frame with its whole width gives far less than that.
+    """
+    sys.path.insert(0, os.path.join(KIT, "capture"))
+    import naver_vr as NV
+    g, roof = meta["ground_m"], meta["roof_m"]
+    box, dpr = meta["canvas_css"], meta["dpr"]
+    W_, H_ = shot["img"]
+    mx, my = W_ * 0.02, H_ * 0.02
+    N = 240
+    ok = []
+    for k in range(N + 1):
+        y = g + (roof - g) * k / N
+        a = NV.project_px(shot, [plane["p0"][0], y, plane["p0"][1]], box, dpr, shot["img"])
+        b = NV.project_px(shot, [plane["p1"][0], y, plane["p1"][1]], box, dpr, shot["img"])
+        ok.append(bool(a and b and all(mx <= t[0] <= W_ - mx and my <= t[1] <= H_ - my for t in (a, b))))
+    best, run0 = (0, 0), None
+    for k, good in enumerate(ok + [False]):
+        if good and run0 is None:
+            run0 = k
+        if not good and run0 is not None:
+            if k - 1 - run0 > best[1] - best[0]:
+                best = (run0, k - 1)
+            run0 = None
+    y0 = g + (roof - g) * best[0] / N
+    y1 = g + (roof - g) * best[1] / N
+    P = lambda x_, z_, y_: NV.project_px(shot, [x_, y_, z_], box, dpr, shot["img"])
+    pa0, pa1 = P(*plane["p0"], y1), P(*plane["p0"], y0)
+    pb0, pb1 = P(*plane["p1"], y1), P(*plane["p1"], y0)
+    if not (pa0 and pa1 and pb0 and pb1):
+        return None, None
+    wpx = ((pa0[0] - pb0[0]) + (pa1[0] - pb1[0])) / 2
+    return abs(wpx) / max(plane["length_m"], 1e-6), (y1 - y0)
+
+
+
+# ---------------------------------------------------------------- main
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--meta", required=True, help="capture meta json (photos/.../<dong>_meta.json)")
+    ap.add_argument("--mass", help="model mass json (generic_spec*.json); default: the biggest one in the project")
+    ap.add_argument("--volume", help="volume id inside the mass file")
+    ap.add_argument("--refs", help="photo_refs json, only used to read the px/m of each plane")
+    ap.add_argument("--min-len", type=float, default=6.0, help="ignore planes shorter than this (m)")
+    ap.add_argument("--min-px-per-m", type=float, default=20.0,
+                    help="warn below this capture resolution (window widths need ~20, louver slats ~30)")
+    ap.add_argument("--max-perp", type=float, default=1.5, help="max distance of the plane from the model edge (m)")
+    ap.add_argument("--out", default="work/plane_to_edge.json")
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args()
+
+    if not os.path.isfile(a.meta):
+        raise SystemExit("no such meta file: %s" % a.meta)
+    with open(a.meta, encoding="utf-8-sig") as f:
+        meta = json.load(f)
+
+    mass_path = a.mass
+    if not mass_path:
+        cands = sorted(f for f in os.listdir(ROOT) if f.startswith("generic_spec") and f.endswith(".json"))
+        if not cands:
+            raise SystemExit("no generic_spec*.json in %s - pass --mass" % ROOT)
+        mass_path = os.path.join(ROOT, cands[0])
+    with open(mass_path, encoding="utf-8-sig") as f:
+        spec = json.load(f)
+    vol = pick_volume(spec, a.volume)
+    ring = simplify_ring(vol["footprint"], 2.0)
+    ring_pts = np.array(ring, dtype=float)
+
+    cap_pts = np.array(meta.get("footprint_m") or [], dtype=float)
+    if len(cap_pts) < 4:
+        raise SystemExit("capture meta has no footprint_m")
+
+    R, t, reg = register(cap_pts, ring_pts)
+    warnings = []
+    if reg["residual_mean_m"] > 0.5:
+        warnings.append("registration residual %.2f m: the model outline and the capture outline disagree"
+                        % reg["residual_mean_m"])
+
+    shots = meta.get("shots", [])
+    ppm_by_plane = refs_px_per_m(a.refs)
+    planes_out = []
+    for pl in capture_planes(meta):
+        if pl.get("group_i") is None or pl["length_m"] < a.min_len:
+            continue
+        shot = next((s for s in shots if s.get("wall") == pl["group_i"]), None)
+        if shot is None:
+            continue
+        m0 = R @ np.array(pl["p0"], dtype=float) + t
+        m1 = R @ np.array(pl["p1"], dtype=float) + t
+        hit = edge_coverage(ring_pts, m0, m1, a.max_perp)
+        if not hit:
+            continue
+        _, k, s0, s1, Ld, perp, overlap = hit
+        left_p0 = photo_left_is_p0(meta, pl, shot)
+        if left_p0 is None:
+            continue
+        # s of the photo's left edge: p0 is on the left when left_p0, else p1
+        s_left = s0 if left_p0 else s1
+        s_right = s1 if left_p0 else s0
+        ppm = ppm_by_plane.get(pl["i"])
+        cap_ppm, vis_h = capture_px_per_m(meta, pl, shot)
+        entry = {
+            "plane": pl["i"], "group": pl["group_i"], "length_m": round(pl["length_m"], 3),
+            "azimuth_deg": pl["azimuth_deg"], "edge": k, "edge_length_m": round(Ld, 3),
+            "photo_left_m": round(s_left, 3), "photo_right_m": round(s_right, 3),
+            "mirrored": bool(s_right < s_left),
+            "coverage_m": round(float(overlap), 3),
+            "coverage_ratio": round(float(overlap) / max(pl["length_m"], 1e-6), 3),
+            "perp_m": round(float(perp), 3),
+            # the capture resolution is the real information limit; a stitched plane file can
+            # be resampled to any resolution, so it never raises the limit.
+            "px_per_m_capture": round(cap_ppm, 1) if cap_ppm else None,
+            "px_per_m_file": round(ppm, 1) if ppm else None,
+            "visible_height_m": round(float(vis_h), 1) if vis_h else None,
+        }
+        pw = []
+        limit = entry["px_per_m_capture"] or entry["px_per_m_file"]
+        if limit and limit < a.min_px_per_m:
+            pw.append("capture resolution %.0f px/m is too low to measure window widths (need %.0f); "
+                      "recapture this face wider" % (limit, a.min_px_per_m))
+        if entry["px_per_m_file"] and entry["px_per_m_capture"] \
+                and entry["px_per_m_file"] > entry["px_per_m_capture"] * 1.5:
+            pw.append("the ref file is resampled up (%.0f px/m from %.0f px/m): it has no more detail"
+                      % (entry["px_per_m_file"], entry["px_per_m_capture"]))
+        if entry["coverage_ratio"] < 0.9:
+            pw.append("photo covers only %.0f%% of the model edge" % (entry["coverage_ratio"] * 100))
+        if entry["photo_left_m"] < -0.3 or entry["photo_right_m"] > Ld + 0.3:
+            pw.append("photo reaches outside the model edge (%.2f..%.2f of %.2f m)"
+                      % (entry["photo_left_m"], entry["photo_right_m"], Ld))
+        entry["warnings"] = pw
+        warnings += ["plane %d: %s" % (pl["i"], w) for w in pw]
+        planes_out.append(entry)
+
+    edges_out = []
+    for k in range(len(ring)):
+        ra, rb = ring[k], ring[(k + 1) % len(ring)]
+        Ld = math.hypot(rb[0] - ra[0], rb[1] - ra[1])
+        covering = [q["plane"] for q in planes_out if q["edge"] == k]
+        edges_out.append({"edge": k, "length_m": round(Ld, 3),
+                          "a": [round(ra[0], 3), round(ra[1], 3)],
+                          "b": [round(rb[0], 3), round(rb[1], 3)],
+                          "planes": covering})
+        if not covering:
+            warnings.append("model edge %d (%.2f m) has no photo plane" % (k, Ld))
+
+    out = {"_schema": "photo-plane-map-v1",
+           "_help": "photo planes of the capture mapped onto the model ring; photo u=0 -> photo_left_m",
+           "capture": {"meta": a.meta, "dong": meta.get("dong")},
+           "mass": {"file": os.path.relpath(mass_path, ROOT), "volume": vol.get("id"),
+                    "edges": len(ring)},
+           "registration": reg,
+           "model_edges": edges_out,
+           "planes": planes_out,
+           "warnings": warnings,
+           }
+    os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+    with open(a.out, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=1)
+
+    if a.json:
+        print(json.dumps(out, ensure_ascii=False))
+        return 0
+
+    p("registration: rot %.2f deg, residual mean %.2f m / max %.2f m  (model %s, %d edges)"
+      % (reg["rot_deg"], reg["residual_mean_m"], reg["residual_max_m"], out["mass"]["volume"], len(ring)))
+    p("")
+    p("%-6s %-5s %8s %-6s %9s %9s %6s %7s %7s %7s  %s"
+      % ("plane", "grp", "len_m", "edge", "left_m", "right_m", "cover", "perp", "cap_px", "file_px", "warn"))
+    for q in planes_out:
+        p("%-6d %-5d %8.2f %-6d %9.2f %9.2f %6.2f %7.2f %7s %7s  %s"
+          % (q["plane"], q["group"], q["length_m"], q["edge"], q["photo_left_m"], q["photo_right_m"],
+             q["coverage_ratio"], q["perp_m"],
+             q["px_per_m_capture"] if q["px_per_m_capture"] else "-",
+             q["px_per_m_file"] if q["px_per_m_file"] else "-",
+             "; ".join(q["warnings"])))
+    if warnings:
+        p("")
+        p("warnings:")
+        for w in warnings:
+            p("  - " + w)
+    p("")
+    p("wrote %s" % a.out)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main() or 0)
