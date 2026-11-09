@@ -303,7 +303,7 @@ def corner_post(mb, x, y, sx, sy, size, z0, z1, region="frame"):
 
 
 # =============================================================================
-# 표준 평면 프리셋 + 소켓 장식 (v1, 2026-11 설계안 구현 — 아직 실제 건물로 검증 안 됨)
+# 표준 평면 프리셋 + 소켓 장식 (아직 실제 건물로 검증 안 됨)
 # -----------------------------------------------------------------------------
 # BuildingMeta 가 들고 다니는 좌표계 규칙 (모두 이 규칙을 지켜야 서로 맞물림):
 #   - normal_deg: atan2(nx, ny) % 360 식으로 구한 벽의 바깥 법선 방위각.
@@ -412,7 +412,7 @@ def preset_tower_l_core(A, wing_a, wing_b, floors, floor_h, core_pos="corner",
 def preset_piloti_base(meta, piloti_h, column_grid, lobby_bay, quality_stage=QualityStage.FULL):
     """기존 BuildingMeta 의 'front'(또는 'wing_a_front') 벽 1층에 필로티 기둥 배열 + 공동현관
     로비 매스를 덧붙인다. lobby_bay = (a0, a1): 로비가 막는 구간(그 구간엔 기둥을 안 세운다).
-    주의(v1 단순화): 기둥을 벽 앞면 바로 바깥(깊이 column_grid*0 ~ 0.5m)에만 둔다 — 실제 필로티는
+    주의: 기둥을 벽 앞면 바로 바깥(깊이 column_grid*0 ~ 0.5m)에만 둔다 — 실제 필로티는
     보통 건물 가장자리에서 더 안쪽으로 들어간 구조이므로, 건물마다 사진으로 실제 기둥 깊이를 확인해야 한다."""
     front = meta.WALLS.get("front") or meta.WALLS.get("wing_a_front")
     if front is None:
@@ -484,7 +484,7 @@ def attach_cornice_band(meta, target_floors, depth=0.15, height=0.3, quality_sta
 
 def attach_entrance_canopy(meta, bay_index, style="flat", quality_stage=QualityStage.FULL):
     """ENTRANCE_SOCKETS[bay_index] 자리에 문주 캐노피를 붙인다(얇은 슬래브 + 기둥, LESSONS 규칙).
-    style: flat(평슬래브) | gable(박공, v1 은 flat 과 동일 - 추후 보강)."""
+    style: flat(평슬래브) | gable(박공, 아직 flat 과 동일 - 추후 보강)."""
     if quality_stage >= QualityStage.LOD_CULL:
         return
     if bay_index >= len(meta.ENTRANCE_SOCKETS):

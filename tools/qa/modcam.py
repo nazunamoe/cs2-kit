@@ -1,6 +1,6 @@
 # 에셋 .blend 를 지정한 카메라(위치·목표·렌즈)로 렌더 (낮은 거리에서 올려다보기, meta 카메라 재현). LOD·Cube 는 지운다.
 # usage: blender -b asset.blend -P tools/qa/modcam.py -- out.png camx camy camz tx ty tz [lens=50] [W=1314 H=1021]
-# (옛 modcam.py 와 modcam2.py 를 합친 것: W H 를 주면 meta 캔버스 비율 등 임의 크기, 안 주면 1314x1021)
+# W H 를 주면 meta 캔버스 비율 등 임의 크기, 안 주면 1314x1021
 import bpy, sys, math
 from mathutils import Vector
 a = sys.argv[sys.argv.index("--") + 1:]

@@ -21,7 +21,6 @@ Tower dict keys (see projects/*/..._data.py for full examples):
 Globals the data module may set before building: facade_engine.PARAPET, BASE_TONE[dong], ROOF_RAILS[dong], RAIL_DIM[dong].
 Zone rules learned the hard way: paints over a window block it (WIN_BLOCKED) - use the zone `mat` as the base and put the
 light frames on top (`wf`); window sill >= 0.12 above the zone floor; windows closer than 5 cm to a wall piece end vanish.
-(Derived from two apartment-block generators, 2026-11.)
 """
 import math
 import os
@@ -47,7 +46,7 @@ PARAPET = 1.6       # parapet height above the roof slab; building data may set 
 PT = 0.3            # parapet thickness
 WIN_IN = 0.20       # window glass set back from the wall face (reveal depth); the light line under a window in the photos is this reveal, NOT a sill bar
 CREAM_BAND = False  # the scan's cream parapet band is a steel railing -> ROOF_RAILS / build_roof_rails
-MIRROR_Y = False    # facade_engine.MIRROR_Y = True mirrors the finished tower front<->back (data frame was a mirror image of reality)
+MIRROR_Y = False    # facade_engine.MIRROR_Y = True mirrors the finished tower front<->back (source data may be mirrored)
 SASH = False        # building data may set facade_engine.SASH = True: 1.0-1.8 m windows become 2-sash sliders
 CW_IN = 0.12      # glass set back in curtain-wall-look (black) zones
 
@@ -101,9 +100,7 @@ def mk(dong, blocks, zones, base, flip=None, **kw):
 
 
 
-# ---- helpers for the 105 / 107 slab towers (same facade system as 106, measured per tower on work/e<dong>/v*.png with
-# scripts/colstrips.py (white piers / brown strips), wmask.py (bands), winlist.py (windows), brown.py; user rules in
-# shape_notes.md). Paint layers: brown strips 1, white bands 2, white piers 3 (flat, nothing stands out).
+# ---- slab tower facade helpers. Paint layers: brown strips 1, white bands 2, white piers 3 (flat, nothing stands out).
 FH_ = 2.83
 
 
@@ -188,7 +185,7 @@ def stone_painter(c):
 
 
 def vstripe_painter(c):
-    """grey wall panels: VERTICAL stripes (user: all vertical-striped panels are one colour)"""
+    """grey wall panels: VERTICAL stripes (all vertical-striped panels are one colour)"""
     c.joints(cols=18, rows=1, width_m=0.015, stagger=0.0, darken=0.25)
     c.grain(amp=2)
 
@@ -225,19 +222,19 @@ def stone_painter_dk(c):
 
 def stone_painter_lt(c):
     c.joints(cols=2, rows=2, width_m=0.01, stagger=0.0, darken=0.32)     # podium granite grid 0.9 x 0.6 (window_down.png)
-    c.grain(amp=4)          # was 12: read as white dots from a distance
+    c.grain(amp=4)          # keep low: 12 reads as white dots from a distance
 
 
 def make_atlas(size=4096):
     A = K.Atlas(size=size, pad=8)
-    # colours = photo medians (101_side1/2 wall, CW, base; side9/11 taupe panels)
+    # colours = photo medians (wall, CW, base, taupe panels)
     A.add("white", color=(190, 196, 199), gloss=0.25, px=512, tile=(4.0, 4.0), painter=wall_painter)   # #c4c5cd
     # curtain-wall-look glass panels: smooth (no grain / no normal noise), high gloss, slightly metallic   #151720
     # tone pulled toward the in-game window (_Win) colour (kit preview #54738f) so the openings merge into one glass
-    # skin (user request); photo panel colour was #151720
+    # skin; photo panel colour #151720
     A.add("black", color=(58, 78, 100), metal=0.6, gloss=0.95, px=64)           # #3a4e64
-    A.add("taupe", color=(93, 90, 94), metal=0.2, gloss=0.4, px=256, tile=(4.0, 4.0), painter=wall_painter)   # #5d5a5e scan 101 core C1 (lit)
-    A.add("stone", color=(74, 75, 78), gloss=0.45, px=512, tile=(1.2, 0.9), painter=stone_painter)   # #4a4b4e scan 101 front base
+    A.add("taupe", color=(93, 90, 94), metal=0.2, gloss=0.4, px=256, tile=(4.0, 4.0), painter=wall_painter)   # #5d5a5e (lit core)
+    A.add("stone", color=(74, 75, 78), gloss=0.45, px=512, tile=(1.2, 0.9), painter=stone_painter)   # #4a4b4e (front base)
     # podium granites (low_detail*.png, scan medians lifted to daylight): 0.9 x 0.6 m panels
     A.add("stone_dk", color=(52, 55, 62), gloss=0.65, px=512, tile=(1.8, 1.2), painter=stone_painter_dk)   # polished blue-black
     A.add("stone_md", color=(78, 79, 85), gloss=0.45, px=512, tile=(1.8, 1.2), painter=stone_painter)      # dark grey granite
@@ -247,61 +244,58 @@ def make_atlas(size=4096):
     A.add("screen", color=(204, 205, 210), gloss=0.2, px=128, tile=(3.6, 4.0), painter=make_screen_painter)
     A.add("lattice", color=(214, 215, 218), gloss=0.25, px=128, tile=(3.0, 5.8), painter=make_lattice_painter)
     A.add("sill", color=(236, 236, 234), gloss=0.3, px=32)
-    # 104 (scan 939927 texture, median over floors 12-34)
+    # measured median over floors 12-34
     A.add("gray4", color=(120, 126, 133), gloss=0.3, px=256, tile=(4.0, 4.0), painter=wall_painter)    # #787e85 front bands
     A.add("lgray4", color=(147, 152, 159), gloss=0.3, px=256, tile=(4.0, 4.0), painter=wall_painter)   # #93989f east part
     A.add("gray4d", color=(97, 102, 107), gloss=0.3, px=256, tile=(4.0, 4.0), painter=wall_painter)    # #61666b recess / C1
-    A.add("gray102", color=(112, 114, 119), gloss=0.3, px=256, tile=(4.0, 4.0), painter=wall_painter)   # #6c6e73 102/103 grey bands
+    A.add("gray102", color=(112, 114, 119), gloss=0.3, px=256, tile=(4.0, 4.0), painter=wall_painter)   # #6c6e73 (grey bands)
     A.add("cream", color=(215, 207, 183), gloss=0.2, px=128, tile=(4.0, 4.0), painter=wall_painter)   # #d7cfb7 parapet band
     for dn, col in (("101", (62, 62, 68)), ("102", (70, 72, 78)), ("104", (60, 61, 66)), ("107", (64, 64, 70)), ("108", (62, 63, 68))):   # stair stripe paint (scan, between windows)
         A.add("stripe" + dn, color=col, gloss=0.3, px=128, tile=(4.0, 4.0), painter=wall_painter)
     A.add("reliefdk", color=(52, 54, 62), metal=0.3, gloss=0.5, px=256, tile=(3.6, 4.0), painter=make_relief_painter)   # dark triangle relief
     A.add("platetop", color=(162, 161, 158), gloss=0.2, px=64, tile=(1.0, 1.0),
-          painter=lambda c: (c.joints(1, 1, width_m=0.04, darken=0.35), c.grain(amp=3)))   # 102 crown plate tops: light grey, 1 m joints (scan texture)
-    A.add("pergtop", color=(60, 54, 51), metal=0.3, gloss=0.4, px=128, tile=(1.6, 1.6), painter=make_pergtop_painter)   # 106 black frame top grid
-    A.add("mint106", color=(222, 234, 227), gloss=0.3, px=128, tile=(4.0, 4.0), painter=wall_painter)   # #d4e3db scan 106 west strip
-    A.add("stripe105", color=(70, 69, 74), gloss=0.3, px=128, tile=(4.0, 4.0), painter=wall_painter)   # #46454a scan 105 front stair stripe
-    for nm, hh in (("rel105a", 1.428), ("rel105b", 2.856), ("rel105c", 5.712)):   # 105 west black relief, diamonds 1.24 m wide
+          painter=lambda c: (c.joints(1, 1, width_m=0.04, darken=0.35), c.grain(amp=3)))   # crown plate tops: light grey, 1 m joints
+    A.add("pergtop", color=(60, 54, 51), metal=0.3, gloss=0.4, px=128, tile=(1.6, 1.6), painter=make_pergtop_painter)   # black frame top grid
+    A.add("mint106", color=(222, 234, 227), gloss=0.3, px=128, tile=(4.0, 4.0), painter=wall_painter)   # #d4e3db (west strip)
+    A.add("stripe105", color=(70, 69, 74), gloss=0.3, px=128, tile=(4.0, 4.0), painter=wall_painter)   # #46454a (front stair stripe)
+    for nm, hh in (("rel105a", 1.428), ("rel105b", 2.856), ("rel105c", 5.712)):   # west black relief, diamonds 1.24 m wide
         A.add(nm, color=(56, 54, 62), metal=0.3, gloss=0.5, px=128, tile=(2.475, hh), painter=make_diamond_painter(2, 1))
-    A.add("sfgrid", color=(24, 26, 30), metal=0.4, gloss=0.4, px=128, tile=(3.6, 4.0), painter=make_sfgrid_painter)   # 101 roof plate underside (101_ref4)
-    A.add("brownfr", color=(66, 58, 54), metal=0.3, gloss=0.4, px=128, tile=(4.0, 4.0), painter=wall_painter)   # brown-charcoal frame round the black CW (102_side8, 103_side1)
-    A.add("rel106", color=(52, 54, 62), metal=0.3, gloss=0.5, px=128, tile=(4.0, 4.0), painter=wall_painter)   # 106 west relief panel base
+    A.add("sfgrid", color=(24, 26, 30), metal=0.4, gloss=0.4, px=128, tile=(3.6, 4.0), painter=make_sfgrid_painter)   # roof plate underside
+    A.add("brownfr", color=(66, 58, 54), metal=0.3, gloss=0.4, px=128, tile=(4.0, 4.0), painter=wall_painter)   # brown-charcoal frame round the black CW
+    A.add("rel106", color=(52, 54, 62), metal=0.3, gloss=0.5, px=128, tile=(4.0, 4.0), painter=wall_painter)   # west relief panel base
     A.add("rib106", color=(78, 80, 90), metal=0.4, gloss=0.55, px=32)          # its raised creases / joints (lit edges)
-    A.add("stripe108d", color=(44, 46, 52), gloss=0.3, px=128, tile=(4.0, 4.0), painter=wall_painter)   # 108 east core stair stripe (0.75 x core)
-    A.add("pave107", color=(56, 56, 60), gloss=0.3, px=128, tile=(1.2, 1.2), painter=stone_painter_dk)   # 107 back terrace deck (dark, 107_side10)
-    A.add("char105", color=(40, 42, 48), gloss=0.35, px=256, tile=(4.0, 4.0), painter=wall_painter)   # #23252a scan 105 front-left podium, lifted
+    A.add("stripe108d", color=(44, 46, 52), gloss=0.3, px=128, tile=(4.0, 4.0), painter=wall_painter)   # east core stair stripe (0.75 x core)
+    A.add("pave107", color=(56, 56, 60), gloss=0.3, px=128, tile=(1.2, 1.2), painter=stone_painter_dk)   # back terrace deck (dark)
+    A.add("char105", color=(40, 42, 48), gloss=0.35, px=256, tile=(4.0, 4.0), painter=wall_painter)   # #23252a (front-left podium, lifted)
     A.add("char", color=(58, 60, 63), metal=0.2, gloss=0.4, px=128, tile=(4.0, 4.0), painter=wall_painter)  # #3a3c3f cores
     A.add("fin", color=(214, 215, 222), gloss=0.3, px=128, tile=(4.0, 4.0), painter=wall_painter)
-    # this complex (scan texture x1.3, less blue): grey panels behind the white frames, light sill panels, dark slits / stair strip
-    # grey panels: horizontal stripe pattern (photos/window_down.png, ~0.22 m pitch, estimated)
-    # grey panels = 0.55 x the white frames, neutral grey: street photo of the 106 back in shade 0.51 (bluish), overcast
-    # scan 0.55 (bluish), sunny front photo 0.69 with the white clipped (yellowish) -> the sun-warm khaki was wrong (user)
-    # (v3, user: the neutral / khaki versions looked yellowish) VR photos 106_side1/2: frames #b1bac2, panels
-    # #52616b (0.5 x frames, blue-grey), podium #4f5562, stair strip #404f68 -> x 1.17 to the "fin" white
-    A.add("dpanel", color=(100, 110, 120), gloss=0.3, px=256, tile=(4.0, 4.0), painter=wall_painter)  # #646e78, plain (no stripes, user)
+    # grey panels behind the white frames, light sill panels, dark slits / stair strip
+    # horizontal stripe pattern (~0.22 m pitch, estimated)
+    # grey panels = 0.55 x the white frames, neutral grey (shade photo 0.51 bluish; sunny photo 0.69 clips white)
+    # VR photos: frames #b1bac2, panels #52616b (0.5 x frames), podium #4f5562, stair strip #404f68
+    A.add("dpanel", color=(100, 110, 120), gloss=0.3, px=256, tile=(4.0, 4.0), painter=wall_painter)  # #646e78, plain (no stripes)
     A.add("dpanelh", color=(100, 110, 120), gloss=0.3, px=256, tile=(4.0, 4.0), painter=stripe_painter)  # back: same colour, horizontal stripes (photo)
     # (dsill below: the only HORIZONTAL-striped panels, lighter, under the small windows)
-    A.add("dsill", color=(120, 132, 144), gloss=0.3, px=256, tile=(4.0, 4.0), painter=stripe_painter)    # under the small windows: 1.2 x panel (scan, 106_side9/14/15)
+    A.add("dsill", color=(120, 132, 144), gloss=0.3, px=256, tile=(4.0, 4.0), painter=stripe_painter)    # under the small windows: 1.2 x panel
     A.add("cstripe", color=(200, 205, 211), gloss=0.25, px=256, tile=(4.0, 4.0), painter=wstripe_painter)  # cores: grey, horizontal grooves (photo)
     A.add("wstripe", color=(196, 200, 206), gloss=0.25, px=256, tile=(4.0, 4.0), painter=wstripe_painter)  # end walls: white, fine horizontal joints
     A.add("stone106", color=(112, 116, 126), gloss=0.35, px=512, tile=(1.8, 1.2), painter=stone_painter_lt)  # podium: VR #4f5562 x 1.17
     A.add("dslit", color=(72, 84, 105), gloss=0.3, px=128, tile=(4.0, 4.0), painter=wall_painter)      # VR #404f68 stair strips
-    # 105 / 107 (VR photos x white reference): brown vertical strips + roof boxes, brown striped east end walls,
-    # dark west faces of the west cores (105_side5 / 107_side5)
+    # brown vertical strips + roof boxes, brown striped east end walls, dark west faces of the west cores
     A.add("bstrip", color=(155, 140, 126), gloss=0.3, px=128, tile=(4.0, 4.0), painter=wall_painter)
     A.add("bend", color=(170, 153, 143), gloss=0.3, px=256, tile=(4.0, 4.0), painter=stripe_painter)
     A.add("cside", color=(110, 120, 135), gloss=0.3, px=128, tile=(4.0, 4.0), painter=wstripe_painter)
     A.add("lgstrip", color=(160, 168, 176), gloss=0.3, px=128, tile=(4.0, 4.0), painter=wall_painter)  # light grey strip in the back grid
-    A.add("dline", color=(42, 54, 64), gloss=0.3, px=128, tile=(4.0, 4.0), painter=wall_painter)       # VR 106_side9 #1d2830: lines beside the cores
+    A.add("dline", color=(42, 54, 64), gloss=0.3, px=128, tile=(4.0, 4.0), painter=wall_painter)       # #1d2830: lines beside the cores
     A.add("rail", color=(196, 198, 200), metal=0.7, gloss=0.6, px=32)
     A.add("srailbar", color=(58, 62, 68), metal=0.6, gloss=0.4, px=32)          # dark steel railing (photo)
     A.add("srail", color=(58, 62, 68), metal=0.6, gloss=0.4, px=128, tile=(1.1, 1.0), painter=picket_painter)
     A.add("roof", color=(150, 148, 142), gloss=0.1, px=256, tile=(4.0, 4.0), painter=lambda c: c.grain(amp=8))
     A.add("coping", color=(200, 200, 198), gloss=0.2, px=64)
     A.add("frame", color=(60, 64, 70), metal=0.8, gloss=0.6, px=32)
-    A.add("truss", color=(66, 54, 48), metal=0.6, gloss=0.5, px=32)           # 101_ref2: dark rust-brown steel
-    A.add("colgrey", color=(150, 152, 156), metal=0.3, gloss=0.4, px=64)       # 101_ref4: grey roof column
-    A.add("cwjoint", color=(74, 92, 112), metal=0.6, gloss=0.7, px=32)       # 101_ref3/ref5: light metal panel joints
+    A.add("truss", color=(66, 54, 48), metal=0.6, gloss=0.5, px=32)           # dark rust-brown steel
+    A.add("colgrey", color=(150, 152, 156), metal=0.3, gloss=0.4, px=64)       # grey roof column
+    A.add("cwjoint", color=(74, 92, 112), metal=0.6, gloss=0.7, px=32)       # light metal panel joints
     A.add("spandrel", color=(52, 70, 90), metal=0.6, gloss=0.95, px=64)        # #34465a lounge spandrel, same glass tone
     A.add("louver", color=(150, 154, 156), metal=0.6, gloss=0.4, px=64)
     A.add("roofw", color=(236, 234, 228), gloss=0.3, px=256, tile=(4.0, 4.0), painter=wall_painter)
@@ -395,13 +389,13 @@ def roofs_of(xs, ys, H):
     return merged
 
 
-# ---- roof railings (user: the "cream parapet band" of the scan is a steel railing, like the 107 back terrace one).
+# ---- roof railings (the "cream parapet band" of the scan is a steel railing, like the back terrace one).
 # Every outer wall piece that ends at a roof + PARAPET was sampled on the textured scan (scripts/rail_edges.py -> rail_survey.py
 # -> rail_decide.py -> rail_table.py): railing where the band roof +0.5..+1.4 is yellowish ((r+g)/2-b >= 7, light), white
 # solid parapets read <= 5. (part, axis, c, s, a0, a1, roof slab) per tower.
 ROOF_RAILS = {}   # (part, axis, c, s, a0, a1, slab) railing runs per dong (filled per tower)
 # (upstand above the roof slab, railing height). Upstand = median band bottom of the scan profiles per tower (absorbs the
-# per-tower roof slab error); the railing is the same product on every tower (user): height = mean of the 8 measured band
+# per-tower roof slab error); the railing is the same product on every tower: height = mean of the 8 measured band
 # heights (1.2, 1.1, 0.8, 1.2, 1.1, 0.9, 1.0, 0.95 -> 1.03) -> 1.05
 RAIL_H = 1.05
 RAIL_F = 0.012    # rail end past an inner polyline corner; 0.03 keeps the rail end face >1 cm off the corner post face (no COPLANAR)
@@ -417,7 +411,7 @@ def with_parapets(blocks, rails=(), up=0.4, out=None, keep=()):
     segs = []                                         # (w, a0, a1, low)
     for w in walls_of(xs, ys, H):
         if w["z1"] < 15.0:
-            continue                                  # low porch / annex roofs: no parapet pit (user: odd protruding faces at the back base)
+            continue                                  # low porch / annex roofs: no parapet pit (avoids protruding faces at the base)
         cuts = sorted((r[4], r[5]) for r in rails if r[1] == w["axis"] and abs(r[2] - w["c"]) < 1e-3 and r[3] == w["s"]
                       and abs(r[6] - w["z1"]) < 1e-3)
         for x0, x1, y0, y1 in keep:                   # a run ending exactly on a post face: 2 cm into the post (no shared face)
@@ -497,7 +491,7 @@ def split_zones(w, T):
 
 
 MAT = {"W": "white", "C": "black", "G": "taupe", "S": "stone", "T": "black", "B": "black", "X": "taupe", "P": "white"}
-# window kinds: (sill, head) above the floor level. Heads line up (photo 101_side2: tops of big/small windows level)
+# window kinds: (sill, head) above the floor level. Heads line up (tops of big/small windows level)
 KINDS = {"L": (0.75, 2.40), "S": (1.70, 2.40), "H": (1.85, 2.40), "F": (0.15, 2.45), "N": (0.75, 2.40)}
 
 
@@ -532,7 +526,7 @@ def along_vec(w, sign=1.0):
     return (sign, 0.0, 0.0) if w["axis"] == "y" else (0.0, sign, 0.0)
 
 
-# window groups measured on 101 (101_side2, 31.6 px/m) - reused where a tower's own photos are too small
+# window groups measured from reference photos (31.6 px/m) - reused where a tower's own photos are too small
 A_UNIT = [(0.6, 3.5, "L"), (4.4, 5.8, "L")]                                       # 6.0 m: living + room
 B_UNIT = [(0.75, 1.95, "L"), (2.6, 3.15, "S"), (3.85, 4.45, "S"), (5.05, 6.3, "L"), (7.3, 8.7, "H")]  # 9.4 m
 C_UNIT = [(0.15, 0.75, "L"), (1.6, 3.2, "L"), (4.0, 5.5, "L"), (6.3, 9.1, "L")]   # 9.3 m: openings in black CW
@@ -543,7 +537,7 @@ def auto_windows(width, typ):
     """fill a wall width with measured window groups (estimated where the photo is not readable)"""
     if typ in ("G", "T", "X") or width < 1.8:
         return []
-    if typ == "P":                                   # fin wall (101_side6/16): 0.5 m slit between fins, 1.2 m pitch
+    if typ == "P":                                   # fin wall: 0.5 m slit between fins, 1.2 m pitch
         n = int((width - 0.2) / 1.2)
         pad = (width - 0.2 - n * 1.2) / 2
         return [(pad + k * 1.2 + 0.55, pad + k * 1.2 + 0.85, "N") for k in range(n)]
@@ -666,7 +660,7 @@ def reveal(mb, w, h, region, depth=WIN_IN):
 
 
 def ledge(mb, w, b0, b1, z, out=0.06, h=0.07, region="sill"):
-    """window sill drip: disabled (user: the white line under windows does not exist; it is the inset reveal in the photos)"""
+    """window sill drip: disabled - the white line under windows does not exist (it is the inset reveal in the photos)"""
     return
     quad_n(mb, [wpt(w, b0, 0, z), wpt(w, b1, 0, z), wpt(w, b1, out, z), wpt(w, b0, out, z)], (0, 0, 1), region)
     quad_n(mb, [wpt(w, b0, out, z - h), wpt(w, b1, out, z - h), wpt(w, b1, out, z), wpt(w, b0, out, z)], out_vec(w), region)
@@ -812,7 +806,7 @@ def backing_lod1(mb, w, a0, a1, z0, z1, holes, deep_below=None):
 
 
 def make_screen_painter(c):
-    """triangle perforated screen (101 back wing): white lattice, triangle holes alpha 0"""
+    """triangle perforated screen (back wing): white lattice, triangle holes alpha 0"""
     import numpy as np
     # cell = 3.6 x 4.0 m: 3 triangle pairs across (1.2 m), 4 rows (1.0 m), every 2nd row shifted half a pair
     u = (c.u * 3.0) % 1.0
@@ -940,7 +934,7 @@ def lounge_cw(main, wins, w, a0, a1, z0, rows, module, unit0):
 
 
 def slope_cw(main, wins, w, a0, a1, zb, ztop, module, row, unit0):
-    """glass in the sloped trapezoid above the lounge rows (101_side5 right, 101_side13 left: the panes run up to the
+    """glass in the sloped trapezoid above the lounge rows (the panes run up to the
     sloped top). Same module as lounge_cw: mullions continue up to the slope, one pane per module, its top cut level
     under the lower corner (the small triangle above stays glass-tone spandrel)"""
     ax, c, sd = w["axis"], w["c"], w["s"]
@@ -983,7 +977,7 @@ def build_poly_lounge(L, main, lod1, lod2, wins, k0=0):
         if pz is not None:
             for mb in (tm, t1, t2):
                 mb.rect(K.face_pts("y", 0.0, -1, 0.0, ln, pz, z0), "white")
-            for mb in (tm, t1, t2):              # inner side too: seen from the open side under the lounge (101)
+            for mb in (tm, t1, t2):              # inner side too: seen from the open side under the lounge
                 mb.rect(K.face_pts("y", 0.02, 1, 0.0, ln, pz, z0), "white")
         if kind == "glass":
             lounge_cw(tm, tw, w, 0.0, ln, z0, L["rows"], L.get("module", 1.2), 500 + (k0 + i) * 10)
@@ -1030,10 +1024,10 @@ def _hseg(mb, w, a0, a1, zc, hh, d, holes, blk):
 
 
 def cw_joints(mb, w, a0, a1, z0, z1, lv, holes, blk, fh, G=None):
-    """panel joints of a curtain-wall-look face as in window_ref.png / 101_ref5: thin lines just lighter than the panel.
+    """panel joints of a curtain-wall-look face as in the reference photo: thin lines just lighter than the panel.
     Verticals only at the left and right edge of every window (run the full zone height, cut around other openings
     and signs); horizontals only at each distinct sill height and at the head height of the windows (cut around openings).
-    No module lines and no spandrel mid lines (user: too many joints)"""
+    No module lines and no spandrel mid lines (too many joints)"""
     ax, c, sd = w["axis"], w["c"], w["s"]
     hs = [h for h in holes if h[5] not in ("slot", "D", "D2", "D3") and h[4] >= 1]
     if not hs:
@@ -1069,7 +1063,7 @@ def cw_joints(mb, w, a0, a1, z0, z1, lv, holes, blk, fh, G=None):
 
 
 def draw_grid(mb, w, a0, a1, z0, z1, lv, holes, blk, G, slab=True):
-    """panel joints of a curtain-wall-look face (101_ref3/ref5): verticals on a module (kept off the openings,
+    """panel joints of a curtain-wall-look face: verticals on a module (kept off the openings,
     cut around signs), slab transoms (punched faces) and extra horizontal joints at floor + mids"""
     if slab:
         for zl in lv[1:]:
@@ -1093,7 +1087,7 @@ def draw_grid(mb, w, a0, a1, z0, z1, lv, holes, blk, G, slab=True):
 
 
 def build_xlattice(mb, X, lv):
-    """stacked X bracing on a narrow face (101 shaft east face, 101_ref3): one X per storey + storey bars"""
+    """stacked X bracing on a narrow face (shaft east face): one X per storey + storey bars"""
     w = dict(axis=X["axis"], c=X["c"], s=X["s"])
     a0, a1 = X["a0"], X["a1"]
     zs = [z for z in lv if X["z0"] - 0.01 <= z <= X["z1"] + 0.01]
@@ -1106,7 +1100,7 @@ def build_xlattice(mb, X, lv):
 
 
 def build_hang_truss(mb, w, a0, a1, zb, zt, depth=0.5, pitch=0.9, tw=0.08, first_post=True):
-    """truss band hanging under a sloped plate (101_ref2/ref4): top chord under the plate, bottom chord `depth`
+    """truss band hanging under a sloped plate: top chord under the plate, bottom chord `depth`
     lower (never below zb), Warren diagonals, end verticals only. Panels thinner than 0.45 m are left out"""
     n = max(1, round((a1 - a0) / pitch))
     nodes = [a0 + (a1 - a0) * i / n for i in range(n + 1)]
@@ -1191,7 +1185,7 @@ def plate_at(R, x, y):
     return min(zs) if zs else None
 
 
-PLT = 0.12          # roof plate thickness (101_ref2/side1: thin white edge)
+PLT = 0.12          # roof plate thickness (thin white edge)
 
 
 def clip_line(P, p, d, m=0.0):
@@ -1259,7 +1253,7 @@ def build_roof_parts(R, main, lod1, lod2):
             zp_ = plate_at(R, x, y)
             z1 = zp_ - PLT if zp_ is not None else z0 + 2.6
         main.box(x - 0.12, x + 0.12, y - 0.12, y + 0.12, z0, z1, "frame", skip=("bottom", "top"))
-    # wedge under the plates stays open: the space frame is seen through it (101_ref4)
+    # wedge under the plates stays open: the space frame is seen through it
     for x, y, z0, sz in R.get("columns", []):
         z1 = plate_at(R, x, y) - PLT
         for mb in (main, lod1):
@@ -1654,7 +1648,7 @@ def build_ribs(T, main):
 
 
 def make_pergtop_painter(c):
-    """black pergola grid seen from above (106_roof_detail): 0.3 m brown-black bars, light grey square openings"""
+    """black pergola grid seen from above: 0.3 m brown-black bars, light grey square openings"""
     import numpy as np
     u, v = c.u % 1.0, c.v % 1.0
     hole = (u > 0.1) & (u < 0.9) & (v > 0.1) & (v < 0.9)
@@ -1678,8 +1672,8 @@ def make_diamond_painter(nx, ny):
 
 
 def make_relief_painter(c):
-    """dark panel wall with a shallow triangle relief (102/103 black shafts and top storeys, photos 103_side3/5, 102_side7):
-    same triangle layout as the 101 wing screen (1.2 m pairs, 1.0 m rows) drawn as lighter edge lines on a dark base"""
+    """dark panel wall with a shallow triangle relief (black shafts and top storeys):
+    same triangle layout as the wing screen (1.2 m pairs, 1.0 m rows) drawn as lighter edge lines on a dark base"""
     import numpy as np
     u = (c.u * 3.0) % 1.0
     v = (c.v * 4.0) % 1.0
@@ -1695,9 +1689,9 @@ def make_relief_painter(c):
 
 
 def make_sfgrid_painter(c):
-    """101 roof plate underside (101_ref4, user: same pattern as the triangle screen left of the "101" number, but black):
+    """roof plate underside: same pattern as the triangle screen, but black.
     screen layout (1.2 m pairs, 1.0 m rows, every 2nd row shifted half a pair), black lattice #181a1e,
-    triangle openings light grey #969ca6 (user: #41485a too dark; photo lattice #131b2a)"""
+    triangle openings light grey #969ca6 (photo lattice #131b2a)"""
     import numpy as np
     u = (c.u * 3.0) % 1.0
     v = (c.v * 4.0) % 1.0
@@ -1794,7 +1788,7 @@ def build_struts(main, lod1, w, a0, a1, so, bars, bands, bw=0.24, sw=0.20, panel
             K.axbox(mb, w["axis"], c, sd, a0 + 0.3, a1 - 0.3, 0.0, 0.30, zc - bw / 2, zc + bw / 2, "fin")   # ledge on the wall
     for z0, z1, segs in bands:
         if xlim is not None and z1 < 100.0:
-            segs = [sg for sg in segs if max(sg) <= xlim]    # mis-read edge struts on the side post (104_bug.png)
+            segs = [sg for sg in segs if max(sg) <= xlim]    # mis-read edge struts on the side post
         z0, z1 = z0 + 0.01, z1 - 0.01
         for i, (xb, xt) in enumerate(segs):
             zz0 = z0
@@ -1811,11 +1805,11 @@ def build_struts(main, lod1, w, a0, a1, so, bars, bands, bw=0.24, sw=0.20, panel
             for (x_0, z_0), (x_1, z_1), sg in ((q[0], q[3], -1), (q[1], q[2], 1)):
                 quad_n(main, [P(x_0, o0, z_0), P(x_1, o0, z_1), P(x_1, o1, z_1), P(x_0, o1, z_0)], (sg, 0, 0), "fin")
     if panel:
-        x0, x1, pz0, pzb = panel                         # number plate below a short bar (photo 104_ref)
+        x0, x1, pz0, pzb = panel                         # number plate below a short bar
         for mb in (main, lod1):
             K.axbox(mb, w["axis"], c, sd, x0, x1, 0.0, 0.29, pzb - bw / 2, pzb + bw / 2, "fin")
             K.axbox(mb, w["axis"], c, sd, x0, x1, 0.0, so + 0.04, pz0, pzb - bw / 2, "gray4")
-            if sides:                                    # white side frames of the plate (103_side10)
+            if sides:                                    # white side frames of the plate
                 for f0, f1 in ((x0 - 0.12, x0), (x1, x1 + 0.12)):
                     K.axbox(mb, w["axis"], c, sd, f0, f1, 0.03, so + 0.08, pz0, pzb - bw / 2, "fin")
         if text:
@@ -1951,7 +1945,7 @@ def slope_bar(mb, xa, za, xb, zb, y0, y1, h, region):
 
 def build_stair(main, S):
     """open steel roof stair along x (x0 at z0 -> x1 at z1): steel treads 0.18 rise, two side stringers, handrail posts
-    + sloped top rail on both sides, optional top landing (x, y box at z1) with a rail and one support post (106_roof_detail)"""
+    + sloped top rail on both sides, optional top landing (x, y box at z1) with a rail and one support post"""
     x0, x1, y0, y1, z0, z1 = S["x0"], S["x1"], S["y0"], S["y1"], S["z0"], S["z1"]
     n = max(2, math.ceil((z1 - z0) / 0.18))
     dx = (x1 - x0) / n
@@ -1983,7 +1977,7 @@ def build_crown_frames(T, main, lod1):
     for F in T.get("crown_frames", []):
         bh = F["beam"]
         zt = (lambda y, f=F["ztop"]: f(y)) if F.get("ztop") else (lambda y: 0.0)
-        zf = (lambda x, y, f=F["ztx"]: f(x)) if F.get("ztx") else (lambda x, y, f=zt: f(y))   # top along x (107 sloped beam)
+        zf = (lambda x, y, f=F["ztx"]: f(x)) if F.get("ztx") else (lambda x, y, f=zt: f(y))   # top along x (sloped beam)
         for x0, x1, y0, y1 in F["beams"]:
             P = [(x0, y0, zf(x0, y0)), (x1, y0, zf(x1, y0)), (x1, y1, zf(x1, y1)), (x0, y1, zf(x0, y1))]
             plate(main, P, bh, F.get("mat", "fin"))
@@ -1997,7 +1991,7 @@ def build_crown_frames(T, main, lod1):
             pz0 = F.get("posts_z0", F["z0"])
             for q0, q1, r0, r1, utop in T.get("low_strips", []):   # the parapet under the post became a railing upstand:
                 # any plan overlap, not only the centre: deep posts / fins only partly on the strip were left hanging
-                # at the old parapet top with a gap above the upstand (102 / 103 / 104 front crown frames, user)
+                # at the parapet top with a gap above the upstand (front crown frames)
                 if x0 < q1 - 1e-3 and x1 > q0 + 1e-3 and y0 < r1 - 1e-3 and y1 > r0 + 1e-3 and pz0 > utop + 1e-3 and not any(
                         x0 < b[1] - 1e-3 and x1 > b[0] + 1e-3 and y0 < b[3] - 1e-3 and y1 > b[2] + 1e-3 for b in T.get("full_strips", [])):
                     pz0 = utop
@@ -2009,11 +2003,11 @@ def build_crown_frames(T, main, lod1):
                        for x_ in (x0 + 0.01, (x0 + x1) / 2, x1 - 0.01) for y_ in (y0 + 0.01, (y0 + y1) / 2, y1 - 0.01)]
                 open_below = min(sup) < pz0 - 0.05
                 mb.box(x0, x1, y0, y1, pz0, zb, F.get("mat", "fin"), skip=("top",) if open_below else ("bottom", "top"))
-        if F.get("deck"):                          # closed plate: tiled top over the whole plate (102_roof_detail)
+        if F.get("deck"):                          # closed plate: tiled top over the whole plate
             for x0, x1, y0, y1 in F["beams"]:
-                # 2 cm in from the plate edges: flush, its underside showed as a 1 cm see-through line from below (102)
+                # 2 cm in from the plate edges: flush, its underside showed as a 1 cm see-through line from below
                 K.floor_quad(main, x0 + 0.02, x1 - 0.02, y0 + 0.02, y1 - 0.02, zt(y0) + 0.01, F["deck"])
-        if F.get("top_mat"):                       # open grid on the plate top (106_roof_detail: black frame with square openings)
+        if F.get("top_mat"):                       # open grid on the plate top (black frame with square openings)
             for x0, x1, y0, y1 in F["beams"]:
                 K.floor_quad(main, x0 + 0.3, x1 - 0.3, y0 + 0.3, y1 - 0.3, zt(y0) + 0.01, F["top_mat"])
 
@@ -2060,7 +2054,7 @@ def build(A, T):
 def mirror_y(out, wins):
     """reflect the whole tower front <-> back (y -> ymin + ymax - y) and keep the faces facing outward:
     quad vertex order (a, b, c, d) -> (b, a, d, c) with the UVs unchanged (texture still reads left to right from outside).
-    Used when the scan -> generator frame turned out to be a mirror image of the real building (101: photos vs model)."""
+    Used when the scan -> generator frame turned out to be a mirror image of the real building (photos vs model)."""
     ys = [v[1] for v in out["main"].verts]
     k = min(ys) + max(ys)
     for mb in out.values():
@@ -2073,7 +2067,7 @@ def mirror_y(out, wins):
             it[key] = [q[1], q[0], q[3], q[2]]
 
 
-STAIR_WIN = {"A": (0.0, 0.85), "B": (1.4, 2.25)}     # stair windows sit on the landings, not on the room-window line (scan, same on 101-104)
+STAIR_WIN = {"A": (0.0, 0.85), "B": (1.4, 2.25)}     # stair windows sit on the landings, not on the room-window line (scan)
 
 
 def expand_slots(T):
@@ -2149,7 +2143,7 @@ def build_wframe(main, lod1, w, a0, a1, z0, z1, lv, WFs):
                     A_[0] += 0.02
                 if abs(A_[1] - B_[1]) < 1e-3 and A_[0] < B_[0]:
                     A_[1] -= 0.02
-    for q0, q1, zb, zt, o, mat, l1 in merged:    # FLAT paint (user: the frames do not stand out); piers (out
+    for q0, q1, zb, zt, o, mat, l1 in merged:    # FLAT paint (the frames do not stand out); piers (out
         lay = int(o) if o >= 1 else (2 if o > 0.16 else 1)   # 0.17) on layer 2 over the bands (0.15, layer 1); out >= 1 = layer
         K.paint(main, w["axis"], w["c"], w["s"], q0, q1, zb, zt, mat, layer=lay)
         if q1 - q0 >= l1:
@@ -2206,8 +2200,8 @@ def build_part(A, T, unit0=0):
                     and a1 - a0 > 1.0 and typ not in ("T", "X"):
                 e = 0.01 if w["axis"] == "x" else 0.0      # x / y walls 1 cm apart: corner overlaps never coplanar
                 ca0, ca1 = a0 + 0.02, a1 - 0.02            # ends 2 cm in: never on a fin / pilaster side face
-                # stop at fins that run down through the base (103 west CW lines, 104 east piers): the cornice crossed in
-                # front of them as a dark horizontal line (user)
+                # stop at fins that run down through the base (west CW lines, east piers): the cornice crossed in
+                # front of them as a dark horizontal line
                 cuts = sorted((fn[0] - fn[1] / 2 - 0.02, fn[0] + fn[1] / 2 + 0.02) for fn in zone.get("fins", [])
                               if isinstance(fn, tuple) and zone.get("fin_z0", base_top) < base_top - 0.4)
                 runs, cur = [], ca0
@@ -2240,9 +2234,9 @@ def build_part(A, T, unit0=0):
                 punched(main, w, a0, a1, z0, z1, [], mat_at, [btop])
                 sz0 = max(z0, btop, 0.02)
                 zw1 = z1
-                z1 = max(z1, zone.get("ztop", z1))   # screen may rise above the wall (101 wing end)
+                z1 = max(z1, zone.get("ztop", z1))   # screen may rise above the wall
                 if z1 > zw1 + 0.1:                   # dark back plate above the wall top: else the roof side shows through
-                    for mb in (main, lod1):          # the screen openings (seen-through, lod_check 106 / 107)
+                    for mb in (main, lod1):          # the screen openings (seen-through, lod_check)
                         K.axbox(mb, w["axis"], w["c"], w["s"], a0 + 0.33, a1 - 0.33, -0.14, -0.02, zw1, z1 - 0.01, mat_of,
                                 skip=("bottom",))   # stands on the parapet top (a bottom face there is coplanar)
                 if zone.get("struts") and z1 - sz0 > 1.0:
@@ -2320,7 +2314,7 @@ def build_part(A, T, unit0=0):
             else:
                 punched(main, w, a0, a1, z0, z1, holes, mat_at, [base_top])
             for h in holes:
-                if is_open(h):                       # empty space behind (108 1F, user): deep recess, dark inside, no window
+                if is_open(h):                       # empty space behind: deep recess, dark inside, no window
                     reveal(main, w, h, "char", depth=1.5)
                     main.rect(K.face_pts(w["axis"], w["c"] - w["s"] * 1.5, w["s"], h[0], h[1], h[2], h[3]), "char")
                     continue
@@ -2345,7 +2339,7 @@ def build_part(A, T, unit0=0):
                 # window); below it the dark backing shows between the pickets
                 gaps = glass(wins, w, h[0], h[1], (min(1.0, h[3] - h[2] - 0.3) + h[2] + 0.1) if steel else h[2], h[3], h[4], unit_id[0], dep)
                 if steel:
-                    # wide (balcony) window: STEEL railing in the reveal (TASK.md railing: 철제, user) - no glass.
+                    # wide (balcony) window: STEEL railing in the reveal (TASK.md railing: 철제) - no glass.
                     # Pickets as an alpha-cut plane (srail: 2 cm bars every 0.11 m, too many tris as mesh on every floor),
                     # handrail + bottom rail as real boxes
                     o_, zr0 = dep * 0.5, h[2] + 0.02
@@ -2354,8 +2348,8 @@ def build_part(A, T, unit0=0):
                     for zz0, zz1 in ((zr0, zr0 + 0.06), (zr0 + hr, zr0 + hr + 0.05)):
                         K.axbox(main, w["axis"], w["c"] - w["s"] * (o_ + 0.03), w["s"], h[0] + 0.01, h[1] - 0.01, 0.0, 0.05, zz0, zz1, "srailbar")
                 if zone.get("ltrim") and h[3] - h[2] > 0.6:
-                    # black CW windows framed by a white L (105_detail, scan v180): sill shelf + jamb on the +a side.
-                    # 105_side1/2 (19 px/m): sill line about 0.2 m tall, jamb about 0.1 m wide (thinner ones were lost at distance)
+                    # black CW windows framed by a white L (detail photo, scan back view): sill shelf + jamb on the +a side.
+                    # detail photos (19 px/m): sill line about 0.2 m tall, jamb about 0.1 m wide (thinner ones were lost at distance)
                     K.axbox(main, w["axis"], w["c"], w["s"], h[0] - 0.02, h[1] + 0.105, 0.0, 0.12, h[2] - 0.18, h[2] + 0.004, "sill")   # 4 mm over the sill joint line
                     if not any(q0 - 1e-3 <= h[0] and h[1] <= q1 + 1e-3 for q0, q1 in zone.get("ltrim_skip", [])):
                         K.axbox(main, w["axis"], w["c"], w["s"], h[1] + 0.005, h[1] + 0.105, 0.0, 0.11, h[2] + 0.004, h[3], "sill")
@@ -2368,13 +2362,13 @@ def build_part(A, T, unit0=0):
                 else:
                     # light rail bar: under the opening, or at 1.05 m across a full-height opening (kind R)
                     rz = h[2] + 1.05 if h[5] == "R" else h[2]
-                    rh, ro = zone.get("rail_h", 0.06), zone.get("rail_out", 0.06)       # 102/103: bold white sill shelf (0.15 x 0.3 m)
+                    rh, ro = zone.get("rail_h", 0.06), zone.get("rail_out", 0.06)       # bold white sill shelf (0.15 x 0.3 m)
                     K.axbox(main, w["axis"], w["c"], w["s"], h[0] - (ro - 0.06) * 0.3, h[1] + (ro - 0.06) * 0.3, 0.0, ro, rz - rh, rz, "rail")
                     for g0, g1 in gaps:
                         K.axbox(main, w["axis"], w["c"], w["s"], g0, g1, 0.0, 0.05, h[2], h[3], "frame")
             G = zone.get("grid")
             if zone.get("panels") and z1 - z0 > 6:
-                pm, pr = zone["panels"]                  # blank shaft: panel joints every pm m across, every pr floors up (102_side15)
+                pm, pr = zone["panels"]                  # blank shaft: panel joints every pm m across, every pr floors up
                 nn = max(1, round((a1 - a0) / pm))
                 for i in range(1, nn):
                     e = a0 + (a1 - a0) * i / nn
@@ -2424,7 +2418,7 @@ def build_part(A, T, unit0=0):
 def hide_dong(T):
     """drop every dong number: wall text (joints / ribs / windows no longer cut around it) and the lattice number
     plates (plate + short bar + side frames; the plate-band struts then run from the band bottom like the rest)"""
-    for P in [T] + list(T.get("parts", [])):         # two-body towers (106) keep signs / zones per part
+    for P in [T] + list(T.get("parts", [])):         # two-body towers keep signs / zones per part
         P["signs"] = []
         for zone in P.get("zones", []):
             if isinstance(zone, dict):
@@ -2446,7 +2440,7 @@ def run(tower_fn, atlas=None, argv=None):
     meshes = build(A, T)
     folder, _ = K.export_asset(T["name"], LEVEL, meshes, A, out, lod2_tex=512,
                                notes=dict(dims="scan plan + VR floors", lot="auto", tower=T.get("dong", "")))
-    # LOD1 shares the main atlas; copy the 5 main maps under the LOD1 name (older kits did not; harmless otherwise)
+    # LOD1 shares the main atlas; copy the 5 main maps under the LOD1 name.
     import shutil
     asset = os.path.basename(os.path.normpath(folder))
     for kind in ("BaseColor", "ControlMask", "Emissive", "MaskMap", "Normal"):
