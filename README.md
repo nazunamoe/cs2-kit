@@ -1,6 +1,6 @@
-# CS2 건축 에셋 키트 — DeepSeek via Codex
+# CS2 건축 에셋 키트 — OpenCode
 
-사진과 건축 정보로 Cities: Skylines II 건축 에셋을 만드는 키트입니다. 이 브랜치는 **`deepseek-flash`의 이미지·도구 호출 기능과 Codex의 Responses API 연결**을 사용하며, 공통 생성기와 검증 엔진은 그대로 유지합니다.
+사진과 건축 정보로 Cities: Skylines II 건축 에셋을 만드는 키트입니다. 이 브랜치는 **OpenCode**에서 실행하며, 모델은 OpenCode의 `provider/model` 설정을 따릅니다. 공통 생성기와 검증 엔진은 그대로 유지합니다.
 
 ## 1. 준비
 
@@ -9,7 +9,7 @@
 - Python 3.9 이상
 - `numpy`, `Pillow`
 - Blender 5.2 — FBX 생성과 최종 LOD 검사에 필요
-- Codex와 DeepSeek API 계정 — 공식 연결 방법은 [DeepSeek 안내](docs/agent/DEEPSEEK.md) 참조
+- OpenCode와 사용할 모델 제공자 계정 — 설치는 [OpenCode 문서](https://opencode.ai/docs/) 참조
 
 키트 루트에서 설치와 초기 설정을 실행합니다.
 
@@ -61,11 +61,20 @@ python tools/band_scan.py --refs photo_refs.json --name 101_p1_1 --fh 2.9 --out 
 
 `paint_include`와 `paint_exclude`로 나무·간판·그림자 등을 정규화된 벽 U/V 좌표로 제외할 수 있습니다. 창은 자동 마스크에서 제외하고, 미확정 셀은 임의 색으로 채우지 않고 `cell_id=-1`로 남겨 기본 벽 재질을 유지합니다. `_mask.png`와 refs 디버그 이미지를 반드시 확인하세요. 캡처 재개, camera 필드, 성능 선택지는 [네이버 VR 캡처와 도색 refs](docs/agent/NAVER_VR.md)에 정리했습니다.
 
-## 3. DeepSeek를 Codex로 실행
+## 3. OpenCode로 실행
 
-[DeepSeek 연결 안내](docs/agent/DEEPSEEK.md)에 따라 Codex의 모델을 `deepseek-flash`로 설정합니다. API 키는 `TASK.md`, README, 로그 등 프로젝트 파일에 저장하지 않습니다. 설정 스크립트는 실행 전에 내용을 검토하고, 키트가 스크립트를 자동 실행하지는 않습니다.
+OpenCode의 모델은 프로젝트 `opencode.jsonc` 또는 전역 `~/.config/opencode/opencode.json`의 `model`로 지정합니다.
 
-키트 루트에서 Codex를 열고 `AGENTS.md`를 따르게 합니다. 첫 환경 점검:
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "ollama-cloud/deepseek-v4.1-flash:1017"
+}
+```
+
+API 키는 `TASK.md`, README, 로그 등 프로젝트 파일에 저장하지 않습니다. 공급자 키는 OpenCode 설정이나 환경 변수로 관리합니다.
+
+키트 루트에서 OpenCode를 열고 `AGENTS.md`를 따르게 합니다. 첫 환경 점검:
 
 ```bash
 python tools/agent.py doctor --project my-apt --json
@@ -79,7 +88,7 @@ tools/agent.py의 next_action을 따라 quick/visual/final 검증을 진행하�
 require-final이 PASS일 때만 완료 보고를 해줘.
 ```
 
-작업별 reasoning 정책을 조회할 수 있습니다.
+작업별 추론 강도를 조회할 수 있습니다.
 
 ```bash
 python tools/agent.py deepseek-policy --project my-apt --task data --json
@@ -90,7 +99,10 @@ python tools/agent.py deepseek-policy --project my-apt --task vision --json
 - `data`: non-thinking, 허용된 데이터만 수정
 - `edit`: low, 오류 그룹 하나만 수정
 - `geometry`, `vision`, `review`: high
+- OpenCode에서는 같은 의도를 모델 variant로 지정할 수 있습니다: `provider/model#low`, `#high`, `#max`
 - 긴 문서와 로그를 모두 넣지 말고 `--brief`와 `next_action`을 사용
+
+모델을 작업별로 나누려면 OpenCode의 `agents`, `commands`, `subagent`를 사용합니다. 이 브랜치에는 복잡한 작업에서 강한 모델의 자문을 받는 `advisor` 도구(`.opencode/plugins/advisor/`)와 읽기 전용 `advisor` 서브에이전트(`.opencode/agents/advisor.md`)가 포함되어 있습니다.
 
 모든 에이전트 명령은 `--project`를 명시합니다. `projects/.current`에 의존하지 않으므로 여러 세션에서도 작업 대상을 명확히 유지할 수 있습니다.
 
@@ -169,15 +181,16 @@ python tools/agent.py fix --project my-apt --generator my_apt_cs2.py --finish --
 - LOD1은 main의 50% 미만, LOD2는 500 tris 이하입니다.
 - main은 30k–60k tris를 목표로 하며 95k 초과는 경고입니다.
 - 삼각형 수를 줄이기 위해 실제 층수, bay, 창 위치를 바꾸지 않습니다.
-- 네이티브 Edit/apply_patch를 우선 사용하고, 셸 문자열로 소스를 조합하지 않습니다.
+- OpenCode의 네이티브 edit/write/patch 도구를 우선 사용하고, 셸 문자열로 소스를 조합하지 않습니다.
 - 코드·YAML 키·도구 출력·파일 이름은 ASCII를 사용합니다.
 
 Windows에서는 PowerShell 7과 UTF-8을 권장합니다. 네이티브 편집이 반복해서 실패할 때만 [PowerShell 편집 fallback](docs/agent/POWERSHELL.md)을 사용합니다.
 
 ## 7. 더 보기
 
+- [OpenCode 문서](https://opencode.ai/docs/)
 - [설치와 업그레이드](INSTALL.md)
-- [DeepSeek 모델·설정·정책](docs/agent/DEEPSEEK.md)
+- [DeepSeek/Codex 연결 기록](docs/agent/DEEPSEEK.md) — 과거 실행기 참고용
 - [전체 작업 절차](docs/agent/WORKFLOW.md)
 - [도구와 API](TOOLS.md)
 - [상세 모델링 지침](docs/agent/MODELING.md)
@@ -188,4 +201,4 @@ Windows에서는 PowerShell 7과 UTF-8을 권장합니다. 네이티브 편집�
 
 ## 알려진 한계
 
-미리보기는 단순 정사영 렌더라 게임의 색·밝기와 다릅니다. 사진 지표는 나무·그림자·원근에 취약하며, `facade_read.py`와 `band_scan.py`는 실제 사진 확인이 필요한 v1입니다. FBX와 LOD는 Blender 없이 완료할 수 없습니다. 최종 크기, 창, 알파, 야간 조명, 정면, 입구, 시그니처 등록은 게임에서 확인하세요. DeepSeek의 실제 작업 완료율·토큰·시간은 모델 연결 후 별도로 측정해야 합니다.
+미리보기는 단순 정사영 렌더라 게임의 색·밝기와 다릅니다. 사진 지표는 나무·그림자·원근에 취약하며, `facade_read.py`와 `band_scan.py`는 실제 사진 확인이 필요한 v1입니다. FBX와 LOD는 Blender 없이 완료할 수 없습니다. 최종 크기, 창, 알파, 야간 조명, 정면, 입구, 시그니처 등록은 게임에서 확인하세요. 선택한 모델의 실제 작업 완료율·토큰·시간은 모델 연결 후 별도로 측정해야 합니다.
