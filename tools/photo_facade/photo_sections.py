@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-photo_sections.py (was paint_from_detail.py) - photo section registry PHOTOS + row fit, used by every
-tools/photo_facade script. Its old main() (per-cell auto paint, do NOT use for final paint) reads the paint of every wall, floor by floor, from the near-frontal detail photos
+photo_sections.py - photo section registry PHOTOS + row fit, used by every
+tools/photo_facade script. main() is a per-cell auto-paint helper (do not use it for final paint); it reads the paint of every wall, floor by floor, from the near-frontal detail photos
 (atype-1..8, btype-1..8: 3D-map facade views, labels "NN F" mark floors).
 
 Every photo is cut into SECTIONS (one depth group of walls that face the camera, e.g. the near head or the bar
@@ -35,7 +35,7 @@ FLOORS = {"A": 58, "B": 57}
 
 # Views (A plan): front = camera along +y (walls facing -y), back = along -y, right = along -x, left = along +x.
 # sec: walls (A edge indices), a = plan positions at the two px columns, px, fl = ((model floor, y), ...) window rows.
-# Floor numbers: the refuge row (blank big bays + one small window on the head walls) = model floor 29 (user);
+# Floor numbers: the refuge row (blank big bays + one small window on the head walls) = model floor 29;
 # the map listing labels "N F" then sit on model floor N - 1 (checked on atype-1/2, btype-1..8). Top visible row
 # without a refuge in view = model floor 57 (estimated, atype-3 far: refuge + top row).
 FRONT_HEAD, FRONT_BAR = [0, 2, 4, 6], [12, 14, 16, 18, 20, 22, 24]
