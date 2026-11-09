@@ -240,7 +240,7 @@ def tier_hint(volume, height):
     return "roof_mass", True
 
 
-def draw_preview(path, volumes, warnings):
+def draw_preview(path, volumes, warnings, title="Simplified GLB mass - review before facade work"):
     from PIL import Image, ImageDraw
     all_points = [p for v in volumes for p in v["footprint"]]
     xs, ys = [p[0] for p in all_points], [p[1] for p in all_points]
@@ -254,7 +254,7 @@ def draw_preview(path, volumes, warnings):
                (222, 205, 137), (167, 205, 208), (221, 173, 166), (194, 194, 215)]
     image = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(image)
-    draw.text((20, 15), "Simplified GLB mass - review before facade work", fill="black")
+    draw.text((20, 15), title, fill="black")
     for i, volume in enumerate(volumes):
         points = [pixel(p) for p in volume["footprint"]]
         color = palette[i % len(palette)]

@@ -79,6 +79,14 @@ python tools/band_scan.py --refs photo_refs.json --name 101_p1_1 --fh 2.9 --out 
 
 `auto`는 URL 하나로 Chrome 디버그 모드를 띄우고, `projects/<name>/photos`에 바로 캡처하며, 새 프로젝트만 TASK.md를 채우고 기존 프로젝트에는 `TASK.auto.md` 제안만 남깁니다. 기존 사진은 `--overwrite` 없이는 덮어쓰지 않습니다.
 
+사진 캡처 없이 `data.xrx.json`만 있으면 동별 매스 초안을 만들 수 있습니다.
+
+```bash
+python tools/xrx_mass.py --project my-apt --xrx photos/data.xrx.json --dongs 101 --force --json
+```
+
+정면·좌표 규칙과 한계는 [네이버 VR 메타데이터 매스](docs/agent/XRX_MASS.md)를 참고하세요.
+
 `paint_include`와 `paint_exclude`로 나무·간판·그림자 등을 정규화된 벽 U/V 좌표로 제외할 수 있습니다. 창은 자동 마스크에서 제외하고, 미확정 셀은 임의 색으로 채우지 않고 `cell_id=-1`로 남겨 기본 벽 재질을 유지합니다. `_mask.png`와 refs 디버그 이미지를 반드시 확인하세요. 캡처 재개, camera 필드, 성능 선택지는 [네이버 VR 캡처와 도색 refs](docs/agent/NAVER_VR.md)에 정리했습니다.
 
 ### GLB 없이 사진으로 작업
@@ -129,6 +137,7 @@ python tools/style_catalog.py --project my-apt --json
 | 입력 | 지원 | 용도와 한계 |
 |---|---|---|
 | GLB 스캔만 (사진 없이) | 지원 | `glb-mass`로 매스·평면·단차를 잡고 스타일 프리셋으로 입면을 채웁니다. 사진 대조는 `NOT_APPLICABLE`입니다. |
+| Naver VR 메타만 (사진 없이) | 부분 지원 | `tools/xrx_mass.py`로 동별 footprint·높이 매스 초안을 만듭니다. 입면 근거는 없습니다. |
 | 위성·평면 이미지 | 지원 | `photo_refs.json`의 `satellite`로 지붕 형상과 가로·세로 비율을 비교합니다. 입면 증거는 아닙니다. |
 | 도면·치수 텍스트 | 지원 | `TASK.md`와 `generic_spec.json`에 직접 적습니다. 창·재질은 사진이나 스타일로 보완합니다. |
 | 자연어만 (사진 없음) | 부분 지원 | 스타일·층수 초안은 나오지만 베이·입구·색은 추정입니다. 사진 게이트는 비어 있습니다. |
@@ -285,6 +294,7 @@ python tools/agent.py fix --project my-apt --generator my_apt_cs2.py --finish --
 - [360 사진 원근 크롭](docs/agent/PANORAMA_360.md)
 - [영상 프레임 추출](docs/agent/VIDEO_FRAMES.md)
 - [IFC에서 GLB로](docs/agent/IFC_TO_GLB.md)
+- [네이버 VR 메타데이터 매스](docs/agent/XRX_MASS.md)
 - [상가·학교·비정형 볼륨](docs/agent/VOLUMES.md)
 - [메모리 범위](docs/agent/MEMORY.md)
 
