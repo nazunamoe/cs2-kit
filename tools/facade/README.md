@@ -32,7 +32,7 @@
 
 `rail_edges.py` / `rail_plan.py` / `rail_table.py` 는 생성기 파일 경로를 환경변수 `FACADE_GEN`에서 읽는다(절대 경로로 줄 것. 기본값 `generator_cs2.py` 는 `tools/scan/` 기준이라 대개 맞지 않는다).
 
-## 2026-11-03 추가·통합
+## 추가·통합 도구
 | 도구 | 용도 |
 |---|---|
 | `pair_ortho.py --frames work/scanframe_<동>.json --dong <동> --blend ...` | 여러 면 일괄 비교 (옛 pairE/pair/pair2/cmp). 파일 형식은 `pair_ortho.py` 맨 위 설명 |

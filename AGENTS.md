@@ -90,7 +90,7 @@ Before reporting a tower or revising a first-pass build, in this order:
 3. Compare the same camera: photo vs model (`cmp_cam`), scan vs model (`pair_ortho`), and zoom 2x on small details. Re-run `final` before `pair_ortho` (visual-only builds give mismatched textures).
 4. Apply a user instruction ("no entrances", "same windows") to every instance at once, left and right, all faces.
 5. Windows within 0.05 m of a wall-piece end silently vanish; check counts after adding windows.
-6. Run `lod_check` and record the image review before any PASS report. Put building-specific numbers in the project `shape_notes.md`, generalizable lessons in `memory/LESSONS.md` (see its 2026-11-07 sections).
+6. Run `lod_check` and record the image review before any PASS report. Put building-specific numbers in the project `shape_notes.md`, generalizable lessons in `memory/LESSONS.md`.
 
 ## Final report
 

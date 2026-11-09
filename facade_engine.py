@@ -46,7 +46,7 @@ LEVEL = 1
 PARAPET = 1.6       # parapet height above the roof slab; building data may set facade_engine.PARAPET
 PT = 0.3            # parapet thickness
 WIN_IN = 0.20       # window glass set back from the wall face (reveal depth); the light line under a window in the photos is this reveal, NOT a sill bar
-CREAM_BAND = False  # the scan's cream parapet band is a steel railing (user 2026-10-30) -> ROOF_RAILS / build_roof_rails
+CREAM_BAND = False  # the scan's cream parapet band is a steel railing -> ROOF_RAILS / build_roof_rails
 MIRROR_Y = False    # facade_engine.MIRROR_Y = True mirrors the finished tower front<->back (data frame was a mirror image of reality)
 SASH = False        # building data may set facade_engine.SASH = True: 1.0-1.8 m windows become 2-sash sliders
 CW_IN = 0.12      # glass set back in curtain-wall-look (black) zones
@@ -139,7 +139,7 @@ LOBBY_KINDS = dict(DE=(0.08, 2.96), DL1=(0.16, 2.96), DLU=(3.26, 5.46), DLS=(0.1
 
 
 def lobby_(x0, x1, y0, yb, top, dc):
-    """glass entrance lobby behind a core (photo of the 105 lobby, 2026-10-31): outer face = a door in a dark portal at
+    """glass entrance lobby behind a core (photo of the 105 lobby): outer face = a door in a dark portal at
     the centre (dc), glass panes beside it below and one glass row above, a thick dark fascia along the top; the two
     side faces glazed. Returns (zones, canopies, solids). DL* / DE kinds start with D: kept under the fascia"""
     zones = [
@@ -188,7 +188,7 @@ def stone_painter(c):
 
 
 def vstripe_painter(c):
-    """grey wall panels: VERTICAL stripes (user 2026-10-31: all vertical-striped panels are one colour)"""
+    """grey wall panels: VERTICAL stripes (user: all vertical-striped panels are one colour)"""
     c.joints(cols=18, rows=1, width_m=0.015, stagger=0.0, darken=0.25)
     c.grain(amp=2)
 
@@ -276,7 +276,7 @@ def make_atlas(size=4096):
     # grey panels: horizontal stripe pattern (photos/window_down.png, ~0.22 m pitch, estimated)
     # grey panels = 0.55 x the white frames, neutral grey: street photo of the 106 back in shade 0.51 (bluish), overcast
     # scan 0.55 (bluish), sunny front photo 0.69 with the white clipped (yellowish) -> the sun-warm khaki was wrong (user)
-    # (2026-10-31 v3, user: the neutral / khaki versions looked yellowish) VR photos 106_side1/2: frames #b1bac2, panels
+    # (v3, user: the neutral / khaki versions looked yellowish) VR photos 106_side1/2: frames #b1bac2, panels
     # #52616b (0.5 x frames, blue-grey), podium #4f5562, stair strip #404f68 -> x 1.17 to the "fin" white
     A.add("dpanel", color=(100, 110, 120), gloss=0.3, px=256, tile=(4.0, 4.0), painter=wall_painter)  # #646e78, plain (no stripes, user)
     A.add("dpanelh", color=(100, 110, 120), gloss=0.3, px=256, tile=(4.0, 4.0), painter=stripe_painter)  # back: same colour, horizontal stripes (photo)
@@ -395,7 +395,7 @@ def roofs_of(xs, ys, H):
     return merged
 
 
-# ---- roof railings (user 2026-10-30: the "cream parapet band" of the scan is a steel railing, like the 107 back terrace one).
+# ---- roof railings (user: the "cream parapet band" of the scan is a steel railing, like the 107 back terrace one).
 # Every outer wall piece that ends at a roof + PARAPET was sampled on the textured scan (scripts/rail_edges.py -> rail_survey.py
 # -> rail_decide.py -> rail_table.py): railing where the band roof +0.5..+1.4 is yellowish ((r+g)/2-b >= 7, light), white
 # solid parapets read <= 5. (part, axis, c, s, a0, a1, roof slab) per tower.
@@ -769,7 +769,7 @@ def merge_l2(rects, recolor=True):
 def build_lod2_shell(T, lod2, base_top):
     """LOD2 walls + roofs from the plain blocks raised by the parapet (no parapet strips: no coping ring / inner
     parapet faces, which used most of the 500 tris). Every wall piece is drawn, slivers too: skipping < 1.5 m pieces
-    left full-height see-through slits (2026-10-31). Zone colours as before, joined per wall (merge_l2)"""
+    left full-height see-through slits. Zone colours as before, joined per wall (merge_l2)"""
     blocks2 = [tuple(b[:4]) + (b[4] + (PARAPET if b[4] >= 15.0 else 0.0),) + tuple(b[5:]) for b in T["blocks"]]
     xs2, ys2, H2 = heightfield(blocks2)
     walls2 = walls_of(xs2, ys2, H2)
@@ -798,7 +798,7 @@ def build_lod2_shell(T, lod2, base_top):
 
 def backing_lod1(mb, w, a0, a1, z0, z1, holes, deep_below=None):
     """LOD1 has the holes but no reveals: one dark plate over the whole wall piece (not one per window row), so a
-    ray through any hole at any angle hits it instead of the open inside of the building (seen-through LOD1, 2026-10-31)"""
+    ray through any hole at any angle hits it instead of the open inside of the building (seen-through LOD1)"""
     if not holes:
         return
     c0 = max(z0, min(h[2] for h in holes) - 0.8)
@@ -1997,7 +1997,7 @@ def build_crown_frames(T, main, lod1):
             pz0 = F.get("posts_z0", F["z0"])
             for q0, q1, r0, r1, utop in T.get("low_strips", []):   # the parapet under the post became a railing upstand:
                 # any plan overlap, not only the centre: deep posts / fins only partly on the strip were left hanging
-                # at the old parapet top with a gap above the upstand (102 / 103 / 104 front crown frames, user 2026-10-31)
+                # at the old parapet top with a gap above the upstand (102 / 103 / 104 front crown frames, user)
                 if x0 < q1 - 1e-3 and x1 > q0 + 1e-3 and y0 < r1 - 1e-3 and y1 > r0 + 1e-3 and pz0 > utop + 1e-3 and not any(
                         x0 < b[1] - 1e-3 and x1 > b[0] + 1e-3 and y0 < b[3] - 1e-3 and y1 > b[2] + 1e-3 for b in T.get("full_strips", [])):
                     pz0 = utop
@@ -2098,7 +2098,7 @@ def expand_slots(T):
 
 def cream_split(T, pieces):
     """beige parapet band (scan 102/103): the top PARAPET of every white/grey wall piece that ends at a roof + PARAPET
-    becomes its own blank piece in the cream material. Off since 2026-10-30: that band is a steel railing (ROOF_RAILS)"""
+    becomes its own blank piece in the cream material. Off: that band is a steel railing (ROOF_RAILS)"""
     if not T.get("cream"):
         return pieces
     tops = [b[4] + PARAPET for b in T["blocks"]]
@@ -2149,7 +2149,7 @@ def build_wframe(main, lod1, w, a0, a1, z0, z1, lv, WFs):
                     A_[0] += 0.02
                 if abs(A_[1] - B_[1]) < 1e-3 and A_[0] < B_[0]:
                     A_[1] -= 0.02
-    for q0, q1, zb, zt, o, mat, l1 in merged:    # FLAT paint (user 2026-10-31: the frames do not stand out); piers (out
+    for q0, q1, zb, zt, o, mat, l1 in merged:    # FLAT paint (user: the frames do not stand out); piers (out
         lay = int(o) if o >= 1 else (2 if o > 0.16 else 1)   # 0.17) on layer 2 over the bands (0.15, layer 1); out >= 1 = layer
         K.paint(main, w["axis"], w["c"], w["s"], q0, q1, zb, zt, mat, layer=lay)
         if q1 - q0 >= l1:
@@ -2207,7 +2207,7 @@ def build_part(A, T, unit0=0):
                 e = 0.01 if w["axis"] == "x" else 0.0      # x / y walls 1 cm apart: corner overlaps never coplanar
                 ca0, ca1 = a0 + 0.02, a1 - 0.02            # ends 2 cm in: never on a fin / pilaster side face
                 # stop at fins that run down through the base (103 west CW lines, 104 east piers): the cornice crossed in
-                # front of them as a dark horizontal line (user 2026-10-31)
+                # front of them as a dark horizontal line (user)
                 cuts = sorted((fn[0] - fn[1] / 2 - 0.02, fn[0] + fn[1] / 2 + 0.02) for fn in zone.get("fins", [])
                               if isinstance(fn, tuple) and zone.get("fin_z0", base_top) < base_top - 0.4)
                 runs, cur = [], ca0
@@ -2345,7 +2345,7 @@ def build_part(A, T, unit0=0):
                 # window); below it the dark backing shows between the pickets
                 gaps = glass(wins, w, h[0], h[1], (min(1.0, h[3] - h[2] - 0.3) + h[2] + 0.1) if steel else h[2], h[3], h[4], unit_id[0], dep)
                 if steel:
-                    # wide (balcony) window: STEEL railing in the reveal (TASK.md railing: 철제, user 2026-10-31) - no glass.
+                    # wide (balcony) window: STEEL railing in the reveal (TASK.md railing: 철제, user) - no glass.
                     # Pickets as an alpha-cut plane (srail: 2 cm bars every 0.11 m, too many tris as mesh on every floor),
                     # handrail + bottom rail as real boxes
                     o_, zr0 = dep * 0.5, h[2] + 0.02

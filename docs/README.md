@@ -49,7 +49,7 @@
 
 | 문서 | 내용 |
 |---|---|
-| [`archive/PROPOSAL_pipeline_v2.md`](archive/PROPOSAL_pipeline_v2.md) | 2026-11-04 파이프라인 2차 개선안. 프리셋·소켓·읽기 도구는 이후 구현됨 |
+| [`archive/PROPOSAL_pipeline_v2.md`](archive/PROPOSAL_pipeline_v2.md) | 파이프라인 2차 개선안. 프리셋·소켓·읽기 도구는 이후 구현됨 |
 
 ## 문서를 추가할 때
 

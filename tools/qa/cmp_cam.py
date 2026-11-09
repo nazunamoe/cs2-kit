@@ -12,7 +12,7 @@
   마지막 줄: CMPCAM OK|WARN iou=… scale=… (iou < 0.80 이면 카메라 가정·az·ground 가 틀렸을 수 있음 → --az / --ground 로 고쳐 다시)
 
 주의
-  - az 규칙: az = (180 + angle) mod 360 이 101동 8방위 모두 육안으로 확인됨(2026-11-04). 이 도구는 아직 az = 180-angle / 180+angle 두 후보 중
+  - az 규칙: az = (180 + angle) mod 360 이 101동 8방위 모두 육안으로 확인됨. 이 도구는 아직 az = 180-angle / 180+angle 두 후보 중
     실루엣이 더 맞는 쪽을 자동 선택하며, 고른 값이 180+angle 과 다르면 WARN 을 낸다(angle 270 은 반대 면을 골랐었음 -> --az 로 고정).
     16장 전부를 올바른 az 로 한 번에 보려면 tools/qa/cmp_all.py.
   - --max-side N : pair/blend 그림의 긴 변을 N px 이하로 저장(토큰 절약, 기본 줄이지 않음).
