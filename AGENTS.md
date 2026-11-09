@@ -83,6 +83,14 @@ Use `WindowSet.add_face` for windows. Use atlas UV helpers for custom quads. `ax
 - Memory scope: `docs/agent/MEMORY.md`
 - PowerShell editing fallback: `docs/agent/POWERSHELL.md`
 
+## Advisor
+
+For complex tasks, consult the advisor before committing to an approach, when an error repeats, and before declaring completion.
+
+- Prefer the `advisor` tool (plugin): it forwards the full session transcript and returns a short plan.
+- If the tool is unavailable, launch the read-only `advisor` subagent and pass a compact summary: goal, attempts, errors, changed files.
+- The advisor cannot edit files or run commands. Treat its output as advice, not as verified fact.
+
 ## Final report
 
 Report files, exact gate/check statuses, warnings, FBX status, estimated values, remaining photo/tile issues and reasons, and in-game checks: real scale, window grid, alpha, flicker, night lights, front direction, colors, entrance, and signature registration.
