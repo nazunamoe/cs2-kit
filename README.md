@@ -192,7 +192,35 @@ python tools/agent.py deepseek-policy --project my-apt --task vision --json
 - OpenCode에서는 같은 의도를 모델 variant로 지정할 수 있습니다: `provider/model#low`, `#high`, `#max`
 - 긴 문서와 로그를 모두 넣지 말고 `--brief`와 `next_action`을 사용
 
-모델을 작업별로 나누려면 OpenCode의 `agents`, `commands`, `subagent`를 사용합니다. 이 브랜치에는 복잡한 작업에서 강한 모델의 자문을 받는 `advisor` 도구(`.opencode/plugins/advisor/`)와 읽기 전용 `advisor` 서브에이전트(`.opencode/agents/advisor.md`)가 포함되어 있습니다.
+모델을 작업별로 나누려면 OpenCode의 `agents`, `commands`, `subagent`를 사용합니다. 이 브랜치에는 복잡한 작업에서 강한 모델의 자문을 받는 `advisor` 도구(`.opencode/plugins/advisor/`)와, 복잡한 조형 작업을 직접 수행하는 `builder` 서브에이전트가 포함되어 있습니다.
+
+### advisor 모델 지정
+
+조언과 복잡한 조형 작업을 강한 모델에 맡기도록 모델을 세 곳에서 지정합니다.
+
+| 파일 | 역할 | 현재 값 |
+|---|---|---|
+| `.opencode/plugins/advisor/index.ts` | `advisor()` 툴이 대화 전문을 넘겨 조언을 받는 모델 (`const MODEL`) | `ollama-cloud/minimax-m3.1-flash` |
+| `.opencode/agents/advisor.md` | 읽기 전용 `advisor` 서브에이전트 (편집·셸 금지) | `ollama-cloud/minimax-m3.1-flash#high` |
+| `.opencode/agents/builder.md` | 작업 가능한 `builder` 서브에이전트 (매스·창·루버·도색·LOD·아틀라스) | `ollama-cloud/minimax-m3.1-flash#high` |
+
+- `#high`는 OpenCode의 모델 variant입니다(`#low`, `#medium`, `#high`, `#xhigh`, `#max`). 모델마다 지원 범위가 다르므로 `opencode models`로 확인합니다.
+- 파일을 고치지 않고 플러그인 옵션으로 바꿀 수도 있습니다.
+
+```jsonc
+{
+  "plugins": [
+    {
+      "package": "./.opencode/plugins/advisor",
+      "options": { "model": { "providerID": "ollama-cloud", "id": "minimax-m3.1-flash" } }
+    }
+  ]
+}
+```
+
+- 에이전트 정의(`.opencode/agents/*.md`)는 **세션 시작 시** 읽히므로 바꾼 뒤 OpenCode를 다시 열어야 목록에 반영됩니다. 플러그인 모델은 다음 `advisor()` 호출부터 적용됩니다.
+- `builder`는 같은 모델이지만 파일 편집·셸 실행 권한이 있고, `advisor`는 조언만 합니다. 게이트 통과와 최종 보고의 책임은 실행 에이전트에 남습니다.
+- 위임 기준은 `AGENTS.md`의 `Work routing`에 있습니다. 여러 수정이 얽힌 작업이나 한 번 실패한 작업은 `builder`로 넘깁니다.
 
 모든 에이전트 명령은 `--project`를 명시합니다. `projects/.current`에 의존하지 않으므로 여러 세션에서도 작업 대상을 명확히 유지할 수 있습니다.
 
