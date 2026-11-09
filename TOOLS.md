@@ -42,7 +42,7 @@ python tools/cycle.py G --mode final --strict --label final --json
 python tools/check.py output/<asset> --list 10 --json previews/check.json
 ```
 
-Errors include naming, ground/pivot, LOD budgets, coplanar faces, blocked windows, UV/atlas issues, and textures. Warnings include texel density, lot size, and main >95k tris. Coordinates are generator coordinates when a manifest exists.
+Errors include naming, ground/pivot, LOD budgets, coplanar faces, blocked windows, UV/atlas issues, and textures. Warnings include texel density, lot size, and main >95k tris. `WIN_DROPPED` is a warning read from the export manifest: the zone builder dropped that many windows because they sat within 5 cm of a wall-piece end, so it is a count of silent losses rather than a guess from the mesh. Coordinates are generator coordinates when a manifest exists.
 
 `[CS2_AGENT_SUMMARY]` action tags:
 
@@ -95,7 +95,8 @@ python tools/extract_texture.py photos/front.jpg --pts 812,402,1290,380,1302,905
 - `glb_slices.py`: individual wall segments from explicit GLB slices; v1.
 - `glb_shape.py` / `agent.py glb-mass`: multi-height outer footprints, simplified polygon volumes, automatic or explicit height tiers, source provenance, and a review preview. See `docs/agent/GLB_MASS.md`.
 - `xrx_mass.py --xrx photos/data.xrx.json --dongs 101`: draft a per-dong mass from Naver VR metadata only (no photo evidence). See `docs/agent/XRX_MASS.md`.
-- `photo_quality.py --dir photos`: blur, resolution, duplicate and exposure gate for reference images. See `docs/agent/PHOTO_QUALITY.md`.
+- `photo_quality.py --dir photos`: blur, resolution, duplicate and exposure gate for reference images. Add `--refs photo_refs.json --min-px-per-m 20` to block a capture whose planes are too low-resolution before registration. See `docs/agent/PHOTO_QUALITY.md`.
+- `photo_plane_map.py`: register capture planes onto model walls; angle+length sliver rule, cached registration, and `--workers` for the coarse rotation sweep. See `docs/agent/PHOTO_PLANE_MAP.md`.
 - `video_frames.py --video walk.mp4`: extract frames from a walkthrough video and add them as photos. See `docs/agent/VIDEO_FRAMES.md`.
 - `crop_360.py --image pan.jpg --yaws 0,90`: perspective crops from a 360/equirectangular photo. See `docs/agent/PANORAMA_360.md`.
 - `ifc_to_glb.py --check|--plan`: available IFC/BIM converters and the conversion route to GLB. See `docs/agent/IFC_TO_GLB.md`.
@@ -116,7 +117,7 @@ python tools/run_blender.py --obj G -- --out output
 python tools/run_blender.py G -- --out output
 ```
 
-`--obj` skips FBX for fast iteration. Without `--obj`, the bpy module is used when found, otherwise Blender; `RUN_BLENDER_ENGINE=exe` forces the app. `pip install bpy` in a matching venv (Blender 5.0 → Python 3.11) writes the same FBX headlessly, with no Blender install; `tools/run_blender.py --fbx2obj` can also read FBX back without Blender. The LOD check prefers the Blender app when present (Workbench renders ~5x faster there) and otherwise uses bpy; `LOD_ENGINE=exe|py` forces one. `compare.py diff --box` fails on mesh changes outside the box; window UVs are compared by position because atlas allocation can reorder them.
+`--obj` skips FBX for fast iteration. Without `--obj`, the bpy module is used when found, otherwise Blender; `RUN_BLENDER_ENGINE=exe` forces the app. `pip install bpy` in a matching venv (Blender 5.0 → Python 3.11) writes the same FBX headlessly, with no Blender install; `tools/run_blender.py --fbx2obj` can also read FBX back without Blender. The LOD check prefers the Blender app when present (Workbench renders ~5x faster there) and otherwise uses bpy; `LOD_ENGINE=exe|py` forces one. `compare.py diff --box` fails on mesh changes outside the box; window UVs are compared by position because atlas allocation can reorder them. `--json` writes the same diff as structured data (mesh counts, out-of-box count, changed texture regions) and prints a `MESHDIFF PASS|FAIL` line; `agent.py fix` runs the same diff after its final cycle.
 
 ## Preset/socket mode (v1, optional)
 
@@ -141,6 +142,16 @@ V1 limitations: piloti depth is simplified; facade_read/band_scan need real-phot
 - `docs/agent/VOLUMES.md`: `--template generic`, arbitrary polygon volumes, wall features, volume LODs, and manifest wall metadata.
 - `tools/evidence.py`: photo/feature/validate ledger commands; normally called through `agent.py evidence`.
 - `K.volume_prism`, `K.build_volume_spec`, `K.wall_quad`: generic geometry API. `export_asset(..., metadata=...)` stores wall/volume metadata for photo alignment.
+
+## State, briefs, and generated docs
+
+```bash
+python tools/state.py --project P --json        # per-stage projection in work/state.yaml
+python tools/docs_gen.py                        # refresh docs/agent/TOOL_<name>.md
+python tools/docs_gen.py --check --json         # exit 1 when a generated doc is stale
+```
+
+`work/state.yaml` mirrors `work/agent_state.json` into stage records (`quick`, `windows`, `final`, `fix`) with the gate status and preview/FBX hashes. A failing gate also writes `work/logs/builder_brief.md`, grouping the failed checks into `build`, `geometry`, `texture`, `lod`, `photo_match`, or `gate`. Generated `TOOL_<name>.md` files are derived from each tool's `--help`; edit the argparse text, not the generated file.
 
 ## Repository sync
 

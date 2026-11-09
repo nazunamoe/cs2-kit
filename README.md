@@ -247,6 +247,7 @@ projects/my-apt/photos 를 contact sheet로 분류하고,
 ```
 
 - 에이전트 정의(`.opencode/agents/*.md`)를 바꾸면 `opencode reload` 또는 새 세션에서 반영됩니다. 플러그인 모델은 다음 `advisor()` 호출부터 적용됩니다.
+- `advisor()`는 최근 `max_turns`(기본 24개 메시지)만 보내고, 같은 입력(모델·focus·전송 본문)의 답은 프로세스 메모리에 캐시합니다(`max_chars` 기본 120000). 옵션: `{"max_turns": 16, "max_chars": 60000}`.
 - `builder`는 같은 모델이지만 파일 편집·셸 실행 권한이 있고, `advisor`는 조언만 합니다. 게이트 통과와 최종 보고의 책임은 실행 에이전트에 남습니다.
 - 위임 기준은 `AGENTS.md`의 `Work routing`에 있습니다. 여러 수정이 얽힌 작업이나 한 번 실패한 작업은 `builder`로 넘깁니다.
 - 작업별 추론 강도를 참고하려면 `python tools/agent.py deepseek-policy --project my-apt --task geometry --json`을 씁니다(정책 조회일 뿐, 모델을 바꾸지는 않습니다).
