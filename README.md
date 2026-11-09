@@ -63,6 +63,14 @@ python tools/band_scan.py --refs photo_refs.json --name 101_p1_1 --fh 2.9 --out 
 부족한 이유, 평면별 해상도(px/m)를 한눈에 볼 수 있습니다. 창 폭을 읽으려면 20 px/m 이상이
 필요하므로, 낮게 나오면 캡처 폭을 키워 재캡쳐해야 합니다(리샘플로 늘려도 정보는 안 늘어납니다).
 
+사진 캡처 없이 `data.xrx.json`만 있으면 동별 매스 초안을 만들 수 있습니다.
+
+```bash
+python tools/xrx_mass.py --project my-apt --xrx photos/data.xrx.json --dongs 101 --force --json
+```
+
+정면·좌표 규칙과 한계는 [네이버 VR 메타데이터 매스](docs/agent/XRX_MASS.md)를 참고하세요.
+
 `paint_include`와 `paint_exclude`로 나무·간판·그림자 등을 정규화된 벽 U/V 좌표로 제외할 수 있습니다. 창은 자동 마스크에서 제외하고, 미확정 셀은 임의 색으로 채우지 않고 `cell_id=-1`로 남겨 기본 벽 재질을 유지합니다. `_mask.png`와 refs 디버그 이미지를 반드시 확인하세요. 캡처 재개, camera 필드, 성능 선택지는 [네이버 VR 캡처와 도색 refs](docs/agent/NAVER_VR.md)에 정리했습니다.
 
 색을 뽑을 때는 그늘을 먼저 보정합니다. 그늘진 벽도 같은 재질이므로 밝은 흰 벽을 기준으로
@@ -96,6 +104,20 @@ python tools/qa/plane_compare.py --project my-building --asset output/<asset> \
 
 해상도가 낮으면(창 폭 측정에 20 px/m 미만) 그 사진으로는 창 폭을 읽을 수 없으니 다시 캡쳐해야 합니다.
 자세한 내용은 [사진 평면 → 모델 벽 매핑](docs/agent/PHOTO_PLANE_MAP.md)을 참고하세요.
+
+### 다른 입력 방법
+
+| 입력 | 지원 | 용도와 한계 |
+|---|---|---|
+| GLB 스캔만 (사진 없이) | 지원 | `glb-mass`로 매스·평면·단차를 잡고 스타일 프리셋으로 입면을 채웁니다. 사진 대조는 `NOT_APPLICABLE`입니다. |
+| Naver VR 메타만 (사진 없이) | 부분 지원 | `tools/xrx_mass.py`로 동별 footprint·높이 매스 초안을 만듭니다. 입면 근거는 없습니다. |
+| 위성·평면 이미지 | 지원 | `photo_refs.json`의 `satellite`로 지붕 형상과 가로·세로 비율을 비교합니다. 입면 증거는 아닙니다. |
+| 도면·치수 텍스트 | 지원 | `TASK.md`와 `generic_spec.json`에 직접 적습니다. 창·재질은 사진이나 스타일로 보완합니다. |
+| 자연어만 (사진 없음) | 부분 지원 | 스타일·층수 초안은 나오지만 베이·입구·색은 추정입니다. 사진 게이트는 비어 있습니다. |
+| 드론·360 사진 | 부분 지원 | 드론 사진은 일반 사진처럼 씁니다. 360/equirectangular는 `tools/crop_360.py`로 원근 크롭한 뒤 넣습니다. |
+| IFC·CAD·BIM | 변환 필요 | `tools/ifc_to_glb.py`로 변환 경로를 확인하고 GLB로 내보낸 뒤 `glb-mass`를 씁니다. |
+| 다른 3D 에셋 | 매스 참고만 | GLB로 가져와 매스만 단순화합니다. 원본 메시·텍스처는 에셋에 복사하지 않습니다. |
+| 영상 워크스루 | 부분 지원 | `tools/video_frames.py`로 프레임을 추출해 사진으로 넣습니다. 자동 정합은 없습니다. |
 
 ## 3. OpenCode로 실행
 
@@ -235,6 +257,11 @@ Windows에서는 PowerShell 7과 UTF-8을 권장합니다. 네이티브 편집�
 - [입면 작업 노하우](docs/agent/FACADE_KNOWHOW.md)
 - [GLB 기반 매스 재구성](docs/agent/GLB_MASS.md)
 - [GLB 없는 사진 증거 작업](docs/agent/PHOTO_ONLY.md)
+- [파사드 스타일과 브리프](templates/styles/README.md)
+- [360 사진 원근 크롭](docs/agent/PANORAMA_360.md)
+- [영상 프레임 추출](docs/agent/VIDEO_FRAMES.md)
+- [IFC에서 GLB로](docs/agent/IFC_TO_GLB.md)
+- [네이버 VR 메타데이터 매스](docs/agent/XRX_MASS.md)
 - [상가·학교·비정형 볼륨](docs/agent/VOLUMES.md)
 - [메모리 범위](docs/agent/MEMORY.md)
 
