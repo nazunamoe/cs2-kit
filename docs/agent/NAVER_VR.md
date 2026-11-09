@@ -23,7 +23,9 @@ Remove `--dry-run` to capture. The command:
 
 TASK fields are filled only while empty or still holding the template placeholder: `building`, `photos`, `complex_name`, `floors` (highest selected dong), `known_facts`, `blender_path`. `name`, `region`, `built_year` are filled only when `--asset-name`, `--region`, `--built-year` are passed. `glb`, `refuge_floor`, `size_m`, `louver`, `railing`, `balcony`, `curtainwall`, `window_type` stay for the human because the tour data does not prove them.
 
-Useful options: `--refs-min-px 200` (lower accepts narrower planes), `--on-blocked ask` (wait for a popup/login), `--close-chrome` (close only the Chrome that `auto` started). If the facade count is low, inspect `photos/refs_check/`; a larger `--window-size` or `--angles 8` adds pixels/directions.
+Useful options: `--refs-min-px 200` (lower accepts narrower planes), `--on-blocked ask` (wait for a popup/login), `--close-chrome` (close only the Chrome that `auto` started), `--headless` (launch the dedicated Chrome with `--headless=new`; experimental, verify the first shot because the VR canvas may render blank or low-detail). If the facade count is low, inspect `photos/refs_check/`; a larger `--window-size` or `--angles 8` adds pixels/directions.
+
+Before facade measurement, run `tools/photo_quality.py --refs photo_refs.json --min-px-per-m 20 --strict` (see `PHOTO_QUALITY.md`). It computes each plane's px/m from the ref image width and `size_m` and blocks a capture that cannot resolve window widths, before registration.
 
 ## What the capture command does
 
