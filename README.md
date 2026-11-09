@@ -261,6 +261,7 @@ Windows에서는 PowerShell 7과 UTF-8을 권장합니다. 네이티브 편집�
 - [360 사진 원근 크롭](docs/agent/PANORAMA_360.md)
 - [영상 프레임 추출](docs/agent/VIDEO_FRAMES.md)
 - [사진 품질 게이트](docs/agent/PHOTO_QUALITY.md)
+- [LOD 자동 후보](docs/agent/LOD_AUTO.md)
 - [IFC에서 GLB로](docs/agent/IFC_TO_GLB.md)
 - [네이버 VR 메타데이터 매스](docs/agent/XRX_MASS.md)
 - [상가·학교·비정형 볼륨](docs/agent/VOLUMES.md)

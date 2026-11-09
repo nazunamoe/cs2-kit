@@ -42,6 +42,7 @@
 |---|---|
 | [`../TOOLS_CLAUDE.md`](../TOOLS_CLAUDE.md) | 도구 명령과 API |
 | [`agent/WORKFLOW.md`](agent/WORKFLOW.md) | quick/visual/final 게이트의 의미 |
+| [`agent/LOD_AUTO.md`](agent/LOD_AUTO.md) | main에서 LOD1/LOD2 후보 생성과 빠른 검사 |
 | [`../README.md`](../README.md) | 최종 보고와 게임 내 확인 항목 |
 
 ## 역사·제안
