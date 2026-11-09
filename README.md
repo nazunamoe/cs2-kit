@@ -151,50 +151,79 @@ python tools/qa/plane_compare.py --project my-building --asset output/<asset> \
 | 다른 3D 에셋 | 매스 참고만 | GLB로 가져와 매스만 단순화합니다. 원본 메시·텍스처는 에셋에 복사하지 않습니다. |
 | 영상 워크스루 | 부분 지원 | `tools/video_frames.py`로 프레임을 추출해 사진으로 넣습니다. 자동 정합은 없습니다. |
 
-## 3. OpenCode로 실행
+## 3. OpenCode로 처음 실행하기
 
-OpenCode의 모델은 프로젝트 `opencode.jsonc` 또는 전역 `~/.config/opencode/opencode.json`의 `model`로 지정합니다.
+처음 보는 사람은 아래 순서대로 하면 됩니다. 설치는 [OpenCode 문서](https://opencode.ai/docs/)를 따릅니다.
+
+### 3.1 준비 확인
+
+```bash
+opencode --version
+python -c "import numpy, PIL; print('deps OK')"
+python tools/run_blender.py --find      # Blender 5.2 또는 bpy 모듈
+```
+
+세 명령이 모두 정상이면 키트를 실행할 준비가 된 것입니다.
+
+### 3.2 모델 연결
+
+OpenCode가 쓸 모델은 **프로젝트 `opencode.jsonc`**(권장) 또는 전역 `~/.config/opencode/opencode.json`의 `model`로 지정합니다. 형식은 `provider/model`이고, 뒤에 `#variant`를 붙일 수 있습니다.
 
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "ollama-cloud/deepseek-v4.1-flash:1017"
+  "model": "ollama-cloud/minimax-m3.1-flash#high"
 }
 ```
 
-API 키는 `TASK.md`, README, 로그 등 프로젝트 파일에 저장하지 않습니다. 공급자 키는 OpenCode 설정이나 환경 변수로 관리합니다.
-
-키트 루트에서 OpenCode를 열고 `AGENTS.md`를 따르게 합니다. 첫 환경 점검:
+- 사용 가능한 모델과 variant는 `opencode models`로 확인합니다. 모델마다 지원하는 variant가 다릅니다(`#low`, `#medium`, `#high`, `#xhigh`, `#max`).
+- 공급자 인증은 `opencode auth`(또는 공급자별 환경 변수)로 설정합니다.
+- **API 키를 `TASK.md`, README, 로그, 프로젝트 파일에 저장하지 않습니다.**
+- 세션 중에 모델만 바꾸고 싶으면 파일을 고친 뒤 `opencode reload`를 실행합니다.
 
 ```bash
-python tools/agent.py doctor --project my-apt --json
+# 한 번만 다른 모델로 실행
+opencode run --model ollama-cloud/minimax-m3.1-flash#high "TASK.md를 읽고 작업을 이어가줘"
 ```
 
-첫 요청 예시:
+### 3.3 세션 시작
 
+키트 루트에서 `opencode`를 실행하면 `AGENTS.md`를 자동으로 읽습니다. 프로젝트는 항상 명시합니다.
+
+```bash
+cd <kit-root>
+opencode
+```
+
+모든 에이전트 명령은 `--project <name>`을 요구합니다(`projects/.current`에 의존하지 않음). 여러 세션을 동시에 열어도 대상이 섞이지 않습니다.
+
+### 3.4 첫 프롬프트
+
+아래를 그대로 복사해 붙여넣으면 됩니다.
+
+**새 건물 시작**
 ```text
 AGENTS.md와 projects/my-apt/TASK.md를 읽고 프로젝트를 만들어줘.
 tools/agent.py의 next_action을 따라 quick/visual/final 검증을 진행하고,
 require-final이 PASS일 때만 완료 보고를 해줘.
 ```
 
-작업별 추론 강도를 조회할 수 있습니다.
-
-```bash
-python tools/agent.py deepseek-policy --project my-apt --task data --json
-python tools/agent.py deepseek-policy --project my-apt --task geometry --json
-python tools/agent.py deepseek-policy --project my-apt --task vision --json
+**중단한 작업 재개**
+```text
+python tools/agent.py resume --project my-apt --json 을 실행하고,
+next_action이 시키는 것만 이어서 해줘. 게이트를 건너뛰지 마.
 ```
 
-- `data`: non-thinking, 허용된 데이터만 수정
-- `edit`: low, 오류 그룹 하나만 수정
-- `geometry`, `vision`, `review`: high
-- OpenCode에서는 같은 의도를 모델 variant로 지정할 수 있습니다: `provider/model#low`, `#high`, `#max`
-- 긴 문서와 로그를 모두 넣지 말고 `--brief`와 `next_action`을 사용
+**사진만 있는 프로젝트**
+```text
+projects/my-apt/photos 를 contact sheet로 분류하고,
+벽별로 창·루버·도색을 읽어서 photo_refs.json과 관측 기록을 만들어줘.
+읽지 못한 부분은 추정하지 말고 unknown으로 남겨.
+```
 
-모델을 작업별로 나누려면 OpenCode의 `agents`, `commands`, `subagent`를 사용합니다. 이 브랜치에는 복잡한 작업에서 강한 모델의 자문을 받는 `advisor` 도구(`.opencode/plugins/advisor/`)와, 복잡한 조형 작업을 직접 수행하는 `builder` 서브에이전트가 포함되어 있습니다.
+프롬프트는 짧아도 됩니다. 판단 기준은 `AGENTS.md`에 있고, 진행 상태는 `work/agent_state.json`에 남습니다. 각 단계의 결과는 `next_action`(다음 명령)으로 돌려주므로, 그 명령을 그대로 실행하면 됩니다.
 
-### advisor 모델 지정
+### 3.5 advisor / builder 모델 지정
 
 조언과 복잡한 조형 작업을 강한 모델에 맡기도록 모델을 세 곳에서 지정합니다.
 
@@ -204,7 +233,6 @@ python tools/agent.py deepseek-policy --project my-apt --task vision --json
 | `.opencode/agents/advisor.md` | 읽기 전용 `advisor` 서브에이전트 (편집·셸 금지) | `ollama-cloud/minimax-m3.1-flash#high` |
 | `.opencode/agents/builder.md` | 작업 가능한 `builder` 서브에이전트 (매스·창·루버·도색·LOD·아틀라스) | `ollama-cloud/minimax-m3.1-flash#high` |
 
-- `#high`는 OpenCode의 모델 variant입니다(`#low`, `#medium`, `#high`, `#xhigh`, `#max`). 모델마다 지원 범위가 다르므로 `opencode models`로 확인합니다.
 - 파일을 고치지 않고 플러그인 옵션으로 바꿀 수도 있습니다.
 
 ```jsonc
@@ -218,11 +246,26 @@ python tools/agent.py deepseek-policy --project my-apt --task vision --json
 }
 ```
 
-- 에이전트 정의(`.opencode/agents/*.md`)는 **세션 시작 시** 읽히므로 바꾼 뒤 OpenCode를 다시 열어야 목록에 반영됩니다. 플러그인 모델은 다음 `advisor()` 호출부터 적용됩니다.
+- 에이전트 정의(`.opencode/agents/*.md`)를 바꾸면 `opencode reload` 또는 새 세션에서 반영됩니다. 플러그인 모델은 다음 `advisor()` 호출부터 적용됩니다.
 - `builder`는 같은 모델이지만 파일 편집·셸 실행 권한이 있고, `advisor`는 조언만 합니다. 게이트 통과와 최종 보고의 책임은 실행 에이전트에 남습니다.
 - 위임 기준은 `AGENTS.md`의 `Work routing`에 있습니다. 여러 수정이 얽힌 작업이나 한 번 실패한 작업은 `builder`로 넘깁니다.
+- 작업별 추론 강도를 참고하려면 `python tools/agent.py deepseek-policy --project my-apt --task geometry --json`을 씁니다(정책 조회일 뿐, 모델을 바꾸지는 않습니다).
 
-모든 에이전트 명령은 `--project`를 명시합니다. `projects/.current`에 의존하지 않으므로 여러 세션에서도 작업 대상을 명확히 유지할 수 있습니다.
+### 3.6 막혔을 때
+
+| 증상 | 확인할 것 |
+|---|---|
+| 모델을 찾지 못함 | `opencode models`에 그 `provider/model`이 있는지, `opencode auth`로 키를 넣었는지 |
+| `Advisor unavailable` | `.opencode/plugins/advisor/index.ts`의 `MODEL` id가 실제 모델 id인지, 키가 유효한지 |
+| `builder`가 목록에 없음 | `.opencode/agents/builder.md` 존재 여부, `opencode reload` 또는 새 세션 |
+| 게이트가 `INCOMPLETE` | `next_action.command`(review 명령)를 그대로 실행 |
+| `agent.py requires --project` | 모든 명령에 `--project <name>` 추가 |
+| 사진 판독이 이상함 | `tools/photo_quality.py`로 품질 확인, 캡처 해상도(px/m) 확인 |
+
+```bash
+python tools/agent.py doctor --project my-apt --json      # 환경 점검
+python tools/agent.py resume --project my-apt --json      # 상태 요약
+```
 
 ## 4. 검증과 완료 기준
 
