@@ -98,6 +98,9 @@ def main():
     ap.add_argument("--dup-pixel", type=float, default=3.0, help="32x32 mean pixel difference for duplicates")
     ap.add_argument("--all", action="store_true", help="print every file, not only flagged")
     ap.add_argument("--strict", action="store_true", help="exit 1 when any file is flagged")
+    ap.add_argument("--refs", help="photo_refs json: check each plane's px/m before facade work")
+    ap.add_argument("--min-px-per-m", type=float, default=20.0,
+                    help="flag planes below this capture resolution (window widths need ~20 px/m)")
     ap.add_argument("--report", help="write the JSON report here")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
@@ -158,11 +161,49 @@ def main():
     for row in rows:
         row.pop("_thumb", None)
 
+    refs_ppm = {}
+    refs_without_size = 0
+    if a.refs:
+        try:
+            with open(a.refs, encoding="utf-8-sig") as f:
+                refs = json.load(f)
+        except (OSError, ValueError) as ex:
+            result = {"status": "FAIL", "dir": a.dir, "images": len(rows),
+                      "error": "cannot read --refs: %s" % ex, "files": rows}
+            print(json.dumps(result, ensure_ascii=False) if a.json else f"[quality] FAIL {result['error']}")
+            return 2
+        for entry in refs.get("facades", []):
+            path = entry.get("file")
+            size = entry.get("size_m") or []
+            if not path:
+                continue
+            if len(size) < 1 or not size[0]:
+                refs_without_size += 1
+                continue
+            try:
+                with Image.open(path) as im:
+                    width = im.size[0]
+            except OSError:
+                continue
+            ppm = width / float(size[0])
+            key = display_path(path)
+            refs_ppm[key] = max(ppm, refs_ppm.get(key, 0.0))
+        for row in rows:
+            ppm = refs_ppm.get(row["file"])
+            if ppm is None:
+                continue
+            row["px_per_m"] = round(ppm, 1)
+            if ppm < a.min_px_per_m and "low_px_per_m" not in row["flags"]:
+                row["flags"].append("low_px_per_m")
+
     flagged = [r for r in rows if r["flags"]]
     result = {"status": "WARN" if flagged else "OK", "dir": a.dir, "images": len(rows),
               "flagged": len(flagged), "thresholds": {"min_side": a.min_side, "blur_min": a.blur_min,
                                                        "dark_clip": a.dark_clip, "bright_clip": a.bright_clip,
-                                                       "dup_distance": a.dup_distance, "dup_pixel": a.dup_pixel},
+                                                       "dup_distance": a.dup_distance, "dup_pixel": a.dup_pixel,
+                                                       "min_px_per_m": a.min_px_per_m},
+              "refs": a.refs, "px_per_m": {k: round(v, 1) for k, v in refs_ppm.items()} if a.refs else None,
+              "refs_without_size": refs_without_size if a.refs else None,
               "files": rows}
     if a.report:
         os.makedirs(os.path.dirname(a.report) or ".", exist_ok=True)

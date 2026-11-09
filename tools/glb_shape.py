@@ -402,10 +402,16 @@ def main():
         source_name = os.path.relpath(source_path, ROOT).replace(os.sep, "/")
     except ValueError:
         source_name = source_path
+    source_hash = sha256(source_path)
+    simplify_params = {"tolerance_m": args.simplify, "min_area_m2": args.min_area,
+                       "max_points": args.max_points, "sample_points": args.samples,
+                       "simplifier": "rdp-ring-v1"}
     spec = {
-        "source": {"type": "simplified_glb_mass", "file": source_name, "sha256": sha256(source_path),
-                   "scale": args.scale, "up": args.up, "front_deg": args.front_deg,
+        "source": {"type": "simplified_glb_mass", "file": source_name, "sha256": source_hash,
+                   "source_hash": source_hash, "scale": args.scale, "up": args.up,
+                   "front_deg": args.front_deg,
                    "aligned_yaw_deg": round(angle, 2), "simplify_m": args.simplify,
+                   "simplify_params": simplify_params,
                    "meshes_used": mesh_names},
         "review": {"required": True, "preview": args.preview.replace(os.sep, "/"),
                    "note": "Mass evidence only. Verify footprint tiers, front direction, ground, and hidden walls against photos."},
@@ -423,6 +429,7 @@ def main():
     draw_preview(preview, volumes, warnings)
     report_data = {"status": "OK", "measured_height_m": round(height, 3), "volume_count": len(volumes),
                    "section_count": len(groups), "warnings": warnings,
+                   "source_hash": source_hash, "simplify_params": simplify_params,
                    "volumes": [{"id": v["id"], "z0": v["z0"], "z1": round(v["z0"] + v["height"], 3),
                                 "points": len(v["footprint"]), "role": v.get("role"),
                                 "keep_solid": v.get("keep_solid")} for v in volumes]}

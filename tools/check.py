@@ -369,6 +369,12 @@ def check_asset(path, args):
 
     # 창문
     info["windows"] = len(M["win"].faces) if "win" in M else 0
+    audit = ((man or {}).get("metadata") or {}).get("window_audit") or {}
+    info["win_dropped"] = int(audit.get("dropped") or 0)
+    if info["win_dropped"]:
+        warn("win_dropped",
+             f"WIN_DROPPED {info['win_dropped']} window(s) within 0.05 m of a wall-piece end were dropped by the zone builder",
+             (audit.get("items") or [])[:5])
     if "win" in M:
         win = M["win"]
         R, bad_uv, bad_aspect = [], [], []
