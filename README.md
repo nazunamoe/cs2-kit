@@ -133,7 +133,7 @@ python tools/style_catalog.py --project my-apt --json
 | 도면·치수 텍스트 | 지원 | `TASK.md`와 `generic_spec.json`에 직접 적습니다. 창·재질은 사진이나 스타일로 보완합니다. |
 | 자연어만 (사진 없음) | 부분 지원 | 스타일·층수 초안은 나오지만 베이·입구·색은 추정입니다. 사진 게이트는 비어 있습니다. |
 | 드론·360 사진 | 부분 지원 | 드론 사진은 일반 사진처럼 씁니다. 360/equirectangular는 `tools/crop_360.py`로 원근 크롭한 뒤 넣습니다. |
-| IFC·CAD·BIM | 변환 필요 | 키트는 IFC/DWG를 직접 읽지 않습니다. GLB나 OBJ로 내보낸 뒤 `glb-mass`를 씁니다. |
+| IFC·CAD·BIM | 변환 필요 | `tools/ifc_to_glb.py`로 변환 경로를 확인하고 GLB로 내보낸 뒤 `glb-mass`를 씁니다. |
 | 다른 3D 에셋 | 매스 참고만 | GLB로 가져와 매스만 단순화합니다. 원본 메시·텍스처는 에셋에 복사하지 않습니다. |
 | 영상 워크스루 | 부분 지원 | `tools/video_frames.py`로 프레임을 추출해 사진으로 넣습니다. 자동 정합은 없습니다. |
 
@@ -154,6 +154,15 @@ python tools/video_frames.py --project my-apt --video photos/walk.mp4 \
 ```
 
 ffmpeg가 없으면 `pip install imageio-ffmpeg`로 설치합니다. 구간·장수·품질 옵션은 [영상 프레임 추출](docs/agent/VIDEO_FRAMES.md)을 참고하세요.
+
+IFC·CAD는 GLB로 변환한 뒤 매스를 만듭니다.
+
+```bash
+python tools/ifc_to_glb.py --check --json
+python tools/ifc_to_glb.py --plan
+```
+
+BlenderBIM/Bonsai, IfcConvert, FreeCAD 경로와 변환 후 점검 항목은 [IFC에서 GLB로](docs/agent/IFC_TO_GLB.md)를 참고하세요.
 
 ### 상가·학교·비정형 건축물
 
@@ -275,6 +284,7 @@ python tools/agent.py fix --project my-apt --generator my_apt_cs2.py --finish --
 - [파사드 스타일과 브리프](templates/styles/README.md)
 - [360 사진 원근 크롭](docs/agent/PANORAMA_360.md)
 - [영상 프레임 추출](docs/agent/VIDEO_FRAMES.md)
+- [IFC에서 GLB로](docs/agent/IFC_TO_GLB.md)
 - [상가·학교·비정형 볼륨](docs/agent/VOLUMES.md)
 - [메모리 범위](docs/agent/MEMORY.md)
 
