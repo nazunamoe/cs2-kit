@@ -64,6 +64,43 @@
 4. 같은 높이의 이웃 면과 폭이 지나치게 다르면 ref 구간 또는 scale을 의심한다.
 5. 상단 crop과 하단 crop을 따로 본다. 전체 세로 시트만 보면 열을 놓친다.
 
+### 자동 측정: facade_read + photo_plane_map
+
+위 재기를 도구가 대신한다. 순서는 **등록 → 측정 → 표** 세 단계다.
+
+```bash
+# 1. 캡처 평면 ↔ 모델 벽 등록 (photo_plane_map.py)
+python tools/photo_plane_map.py --project my-building \
+  --meta photos/<dong>_meta.json --mass generic_spec.json --refs photo_refs.json \
+  --out work/plane_to_edge.json
+
+# 2. 평면 사진에서 열 측정 (facade_read.py)
+python tools/facade_read.py --project my-building --refs photo_refs.json \
+  --plane-map work/plane_to_edge.json --table --fh 2.9 --out previews/facade_read
+```
+
+`facade_read.py`가 하는 일:
+
+- 창 열을 **미터로** 준다(`m`, `w`, `h`, `z`). 정규화 `u`만으로는 생성기에 못 쓴다.
+- `--plane-map`을 주면 각 열을 **모델 벽의 미터 좌표**로 옮겨 적는다(`edge_m`).
+  사진이 반전되어 있으면 순서도 뒤집힌다(`mirrored`).
+- **루버 후보**를 따로 찾는다(`louver_candidates`). 루버는 어두운 구멍이 아니라
+  슬랫이 반복되는 띠라 창 마스크에 잡히지 않는다. 도구는 띠 안의 "층당 가로선 개수"를
+  세어, 매 층 5줄 이상 반복되는 띠를 후보로 낸다(창 구간과 겹치는 띠는 제외).
+- `--table`은 생성기에 바로 붙여 넣을 표를 쓴다:
+
+```python
+COLUMNS = {
+    "main:edge_11": [("wide", 10.59, 13.75), ("small", 7.66, 9.02), ...],
+}
+```
+
+`kind`는 **힌트**다(`wide` | `small` | `louver?`). 폭 1.8 m 이상은 wide로 본다.
+루버/블라인드의 구분은 사진 해상도가 부족하면像素으로는 못 한다(아래 경고 참고).
+
+**해상도 경고**: 캡처 해상도가 20 px/m 미만이면 창 폭을 못 읽고, 30 px/m 미만이면
+루버와 블라인드를 못 구분한다. 이때는 값을 억지로 맞추지 말고 캡처를 다시 한다.
+
 ## 4. 이미지 공간 비교
 
 `box`로 geometry를 자르는 비교는 렌더러가 면 중심으로 필터링하고 벽을 쪼개지 않으면
