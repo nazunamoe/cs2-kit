@@ -5,12 +5,12 @@
 
 ```text
 usage: agent.py [-h] [--json]
-                {doctor,resume,require-final,deepseek-policy,vision,glb-mass,photos,evidence,observe,review,cycle,fix} ...
+                {doctor,resume,glb-mass,photos,evidence,observe,review,cycle,fix} ...
 
 Portable agent entry point. Run from the kit root with an explicit --project.
 
 positional arguments:
-  {doctor,resume,require-final,deepseek-policy,vision,glb-mass,photos,evidence,observe,review,cycle,fix}
+  {doctor,resume,glb-mass,photos,evidence,observe,review,cycle,fix}
 
 options:
   -h, --help            show this help message and exit
