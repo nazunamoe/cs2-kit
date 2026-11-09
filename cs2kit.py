@@ -1631,9 +1631,21 @@ def export_asset(name_base, level, meshes, atlas, out_root, lod2_tex=1024, lot=N
         warns.append("LOD2 > 500 tris")
     if M.tri_count > MAIN_SOFT_MAX:
         warns.append("main > 95000 tris")
+    audit = []
+    try:
+        import facade_engine as _FE
+        audit = list(getattr(_FE, "DROPPED_WINDOWS", []))
+        if audit:
+            metadata = dict(metadata or {})
+            metadata.setdefault("window_audit", {"dropped": len(audit), "items": audit[:100]})
+        _FE.DROPPED_WINDOWS.clear()
+        _FE._DROPPED_KEYS.clear()
+    except Exception:  # noqa: BLE001 - an audit is informational, never fail the export
+        pass
     summary = dict(asset=asset, lot=lot_wd, size=[round(s, 3) for s in size], pivot_shift=[-cx, -cy],
                    tris={k: parts[k].tri_count for k in PARTS}, windows=len(win_main.faces), tex=atlas.size,
-                   lod1_tex=atlas.size, lod2_tex=lod2_tex, warnings=warns, notes=notes or {})
+                   lod1_tex=atlas.size, lod2_tex=lod2_tex, warnings=warns, notes=notes or {},
+                   dropped_windows=len(audit))
     with open(os.path.join(folder, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(dict(summary, atlas=atlas.to_json(), tags={k: sorted(set(parts[k].tags)) for k in PARTS},
                        metadata=metadata or {}), f, ensure_ascii=False, indent=1)

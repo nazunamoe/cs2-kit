@@ -55,8 +55,25 @@ def _dist(a, b):
     return math.hypot(b[0] - a[0], b[1] - a[1])
 
 
-def simplify_ring(foot, min_len=2.0):
-    """Drop vertices that only create sliver walls (they show as LOD cracks)."""
+def _vertex_angle(a, b, c):
+    """Interior angle at b in degrees (0 = spike, 180 = straight through)."""
+    v1 = (a[0] - b[0], a[1] - b[1])
+    v2 = (c[0] - b[0], c[1] - b[1])
+    n1, n2 = math.hypot(*v1), math.hypot(*v2)
+    if n1 < 1e-9 or n2 < 1e-9:
+        return 0.0
+    cos = max(-1.0, min(1.0, (v1[0] * v2[0] + v1[1] * v2[1]) / (n1 * n2)))
+    return math.degrees(math.acos(cos))
+
+
+def simplify_ring(foot, min_len=2.0, max_angle=25.0):
+    """Drop vertices that only create sliver walls (they show as LOD cracks).
+
+    A short edge alone is not a sliver: a 1.5 m return wall on a 90 degree corner is real.
+    A vertex is dropped only when an adjacent edge is shorter than ``min_len`` *and* the
+    turn is sharp (``max_angle`` degrees or less from a spike/straight-through). This keeps
+    genuine short wall segments and removes noise spikes.
+    """
     pts = [tuple(float(q) for q in v) for v in foot]
     changed = True
     while changed and len(pts) > 4:
@@ -64,7 +81,12 @@ def simplify_ring(foot, min_len=2.0):
         n = len(pts)
         for i in range(n):
             a, b, c = pts[(i - 1) % n], pts[i], pts[(i + 1) % n]
-            if _dist(a, b) < min_len or _dist(b, c) < min_len:
+            short = _dist(a, b) < min_len or _dist(b, c) < min_len
+            if not short:
+                continue
+            turn = _vertex_angle(a, b, c)
+            sharp = min(turn, 180.0 - turn) <= max_angle
+            if sharp:
                 pts.pop(i)
                 changed = True
                 break
@@ -129,36 +151,55 @@ def rot(theta):
     return np.array([[c, -s], [s, c]])
 
 
-def register(cap_pts, ring_pts, coarse_step=0.5, fine_step=0.05, search=1.5, coarse_deg=3.0):
+def register(cap_pts, ring_pts, coarse_step=0.5, fine_step=0.05, search=1.5,
+             coarse_deg=3.0, workers=0):
     """Rigid transform (rotation + translation) that maps the capture outline onto the model ring.
 
     A coarse rotation grid (3 deg) locks the basin, then one narrow rotation sweep (0.25 deg)
     and one two-stage translation grid (0.5 m then fine_step) refine it. This is ~200 chamfer
     calls instead of ~2000 for the original 0.5 deg full sweep + 61x61 translation grid, and
     the reported residual tells whether the two outlines even agree.
+
+    ``workers`` > 1 evaluates the coarse rotation grid in threads. The winner is chosen by
+    score and then by ascending angle, so the result does not depend on completion order.
     """
     S_cap = sample_polygon(cap_pts, coarse_step)
     S_model = sample_polygon(ring_pts, coarse_step)
-
-    def score(deg, t):
-        R = rot(math.radians(float(deg)))
-        return chamfer((S_cap @ R.T) + t, S_model), R
+    cap_center = cap_pts.mean(0) if len(cap_pts) else np.zeros(2)
 
     # coarse rotation sweep
-    best = None
-    for deg in np.arange(0.0, 360.0, coarse_deg):
-        th = math.radians(float(deg))
-        R = np.array([[math.cos(th), -math.sin(th)], [math.sin(th), math.cos(th)]])
-        t = ring_pts.mean(0) - R @ cap_pts.mean(0)
-        d = chamfer((S_cap @ R.T) + t, S_model)
-        if best is None or d < best[0]:
-            best = (d, float(deg), R, t)
+    degs = list(np.arange(0.0, 360.0, coarse_deg))
+    n_workers = min(8, len(degs), workers or (os.cpu_count() or 1))
+    if n_workers > 1:
+        from concurrent.futures import ThreadPoolExecutor
+
+        def coarse(deg):
+            th = math.radians(float(deg))
+            R = np.array([[math.cos(th), -math.sin(th)], [math.sin(th), math.cos(th)]])
+            t = ring_pts.mean(0) - R @ cap_center
+            return chamfer((S_cap @ R.T) + t, S_model)
+
+        with ThreadPoolExecutor(max_workers=n_workers) as ex:
+            values = list(ex.map(coarse, degs))
+        idx = min(range(len(degs)), key=lambda k: (values[k], k))
+        d, deg = values[idx], float(degs[idx])
+        R = rot(math.radians(deg))
+        t = ring_pts.mean(0) - R @ cap_center
+    else:
+        best = None
+        for deg in degs:
+            th = math.radians(float(deg))
+            R = np.array([[math.cos(th), -math.sin(th)], [math.sin(th), math.cos(th)]])
+            t = ring_pts.mean(0) - R @ cap_center
+            d = chamfer((S_cap @ R.T) + t, S_model)
+            if best is None or d < best[0]:
+                best = (d, float(deg), R, t)
+        d, deg, R, t = best
     # one narrow rotation refinement
-    d, deg, R, t = best
     for d2 in np.arange(deg - coarse_deg, deg + coarse_deg + 1e-9, 0.25):
         th = math.radians(float(d2))
         R2 = np.array([[math.cos(th), -math.sin(th)], [math.sin(th), math.cos(th)]])
-        t2 = ring_pts.mean(0) - R2 @ cap_pts.mean(0)
+        t2 = ring_pts.mean(0) - R2 @ cap_center
         dd = chamfer((S_cap @ R2.T) + t2, S_model)
         if dd < d:
             d, deg, R, t = dd, float(d2), R2, t2
@@ -195,14 +236,14 @@ def _cache_key(cap_pts, ring_pts, params):
     return h.hexdigest()
 
 
-def register_cached(cap_pts, ring_pts, cache_path, use_cache=True, **kw):
+def register_cached(cap_pts, ring_pts, cache_path, use_cache=True, workers=0, **kw):
     """register() with a deterministic cache; the result depends only on the key inputs.
 
     Returns (R, t, info, cache_hit). A cache read/write failure falls back to register(),
     so a stale or corrupt file can never change the mapping, only its speed.
     """
     if not use_cache or not cache_path:
-        return register(cap_pts, ring_pts, **kw) + (False,)
+        return register(cap_pts, ring_pts, workers=workers, **kw) + (False,)
 
     key = _cache_key(cap_pts, ring_pts, kw)
     entries = {}
@@ -225,7 +266,7 @@ def register_cached(cap_pts, ring_pts, cache_path, use_cache=True, **kw):
         except Exception:  # noqa: BLE001
             pass
 
-    R, t, info = register(cap_pts, ring_pts, **kw)
+    R, t, info = register(cap_pts, ring_pts, workers=workers, **kw)
     entries[key] = {"R": R.tolist(), "t": t.tolist(), "info": info}
     for old in list(entries)[:-CACHE_LIMIT]:
         entries.pop(old, None)
@@ -378,6 +419,8 @@ def main():
                     help="ignore and do not update the registration cache")
     ap.add_argument("--strict", action="store_true",
                     help="exit 1 when a plane is below --min-px-per-m (a capture that cannot be measured)")
+    ap.add_argument("--workers", type=int, default=0,
+                    help="threads for the coarse registration sweep (0=auto, 1=serial)")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
 
@@ -402,7 +445,8 @@ def main():
     if len(cap_pts) < 4:
         raise SystemExit("capture meta has no footprint_m")
 
-    R, t, reg, cache_hit = register_cached(cap_pts, ring_pts, None if a.no_cache else a.cache)
+    R, t, reg, cache_hit = register_cached(cap_pts, ring_pts, None if a.no_cache else a.cache,
+                                           workers=max(0, a.workers))
     warnings = []
     if reg["residual_mean_m"] > 0.5:
         warnings.append("registration residual %.2f m: the model outline and the capture outline disagree"

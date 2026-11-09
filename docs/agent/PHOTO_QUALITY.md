@@ -17,9 +17,23 @@ python tools/photo_quality.py --project my-apt --dir photos/frames --strict --re
 | `clip` | 거의 전체가 포화 | 250 이상 픽셀 비율 > 98% |
 | `dark` | 거의 전체가 검정 | 5 이하 픽셀 비율 > 98% |
 | `flat` | 디테일 없는 단색 | 표준편차 < 8 |
+| `low_px_per_m` | 창 폭을 읽기 어려운 캡처 해상도 | `--refs`의 `size_m` 기준 < `--min-px-per-m`(기본 20) |
 | `unreadable` | Pillow가 열지 못함 | — |
 
 중복 그룹에서는 **해상도가 가장 크고 선명한 사진**을 대표로 남기고 나머지에 `duplicate_of`를 적습니다. 자동 삭제는 하지 않습니다.
+
+## 캡처 px/m 사전 게이트
+
+`photo_refs.json`이 있으면 등록(photo_plane_map) 전에 벽별 해상도를 계산해 측정 불가 캡처를 미리 막습니다.
+사진 폭(px)을 `size_m[0]`으로 나눈 값이며, 20 px/m 미만이면 창 폭을 읽을 수 없습니다.
+
+```bash
+python tools/photo_quality.py --project my-apt --dir photos \
+  --refs photo_refs.json --min-px-per-m 20 --strict --json
+```
+
+- 결과 JSON의 `px_per_m`에 벽별 값이, `refs_without_size`에 `size_m`이 없어 계산하지 못한 항목 수가 남습니다.
+- `--strict`면 `low_px_per_m`도 다른 플래그와 같이 exit 1을 냅니다. 등록 후에는 `photo_plane_map --strict`가 같은 기준으로 막습니다.
 
 ## 조정
 

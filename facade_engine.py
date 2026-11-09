@@ -26,6 +26,11 @@ import math
 import os
 import sys
 
+# Windows dropped because they are within 0.05 m of a wall-piece end. cs2kit.export_asset
+# copies this into manifest metadata so check.py can report the loss instead of it being silent.
+DROPPED_WINDOWS = []
+_DROPPED_KEYS = set()
+
 
 def _find_kit():
     """generators live in projects/<name>/ ; cs2kit.py is in the kit root (one or two folders up)"""
@@ -608,6 +613,13 @@ def _zone_wins(zone, lst, f0, f1, step, lv, z0, z1, a0, a1, T, blk, kinds):
     out = []
     for b0, b1, kind in lst:
         if b0 < a0 + 0.05 or b1 > a1 - 0.05:
+            key = (zone.get("id") or zone.get("name") or "zone", round(b0, 3), round(b1, 3),
+                   round(a0, 3), round(a1, 3))
+            if key not in _DROPPED_KEYS and len(DROPPED_WINDOWS) < 200:
+                _DROPPED_KEYS.add(key)
+                DROPPED_WINDOWS.append({"zone": key[0], "window_m": [key[1], key[2]],
+                                        "zone_m": [key[3], key[4]],
+                                        "reason": "within 0.05 m of the wall-piece end"})
             continue
         s0, s1 = kind[:2] if isinstance(kind, tuple) else kinds[kind]   # tuple = measured (sill, head)
         for k in range(f0 - 1, min(f1, len(lv)), step):

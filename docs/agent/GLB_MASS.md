@@ -25,8 +25,8 @@ The tool:
 - extracts and simplifies outer footprint polygons;
 - detects footprint changes and creates stacked or separate mass volumes;
 - centers X and puts the lowest front extent at Y=0;
-- records source hash, mesh selection, transform, and simplification settings;
-- writes `previews/glb/shape.png` and `shape_report.json` for review.
+- records `source_hash` + `simplify_params` (tolerance, min area, max points, sample points, simplifier version), mesh selection, transform, and simplification settings;
+- writes `previews/glb/shape.png` and `shape_report.json` for review (both repeat the source hash and simplify params).
 
 Only simplified measurements are transferred. Source triangles, textures, window meshes, and facade materials are never copied into the asset.
 
