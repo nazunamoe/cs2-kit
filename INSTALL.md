@@ -44,19 +44,21 @@
    # mixed-use/school/irregular: python tools/project.py new my-building --template generic
    ```
 
-<<<<<<< HEAD
 7. Configure `deepseek-flash` using `docs/agent/DEEPSEEK.md`, then start Codex at the kit root. Never store the API key in project files. The first machine check is:
 
    ```bash
    python tools/agent.py doctor --project my-apt --json
    ```
-=======
-6. Start Claude Code at the kit root and run `/build`.
->>>>>>> eb37db5 (Export FBX without a Blender install (bpy module))
 
 The project contains `TASK.md`, `STATUS.md`, `photos/`, and a copied generator. Reference photos stay in `photos/`; output assets go to `output/`; state and observations go to `work/`.
 
-Optional Naver VR capture also needs `pip install playwright` and Chrome running with remote debugging port 9222. See `docs/agent/NAVER_VR.md`; Blender is not used for VR capture or `make_refs`.
+Check the environment at any time:
+
+```bash
+python tools/agent.py doctor --project my-apt --json
+```
+
+Optional Naver VR capture also needs `pip install playwright`. `capture/naver_vr.py auto` starts Chrome with remote debugging itself; `run`/`batch` still need a Chrome window on port 9222. See `docs/agent/NAVER_VR.md`; Blender is not used for VR capture or `make_refs`.
 
 IFC conversion needs BlenderBIM/Bonsai, IfcConvert or FreeCAD; `tools/ifc_to_glb.py --check` reports what is available. See `docs/agent/IFC_TO_GLB.md`.
 

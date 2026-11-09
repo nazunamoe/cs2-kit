@@ -1,12 +1,16 @@
-"""네이버 부동산 VR 단지 뷰 -> 동별 8방향 입면 캡쳐.
+"""네이버 부동산 VR 단지 뷰 -> 동별 입면 캡쳐 + 프로젝트 사진/refs/TASK 초안.
 
-준비: Chrome 을 디버그 포트로 열고 단지 VR 투어 페이지(fin.land.naver.com/complexes/<번호>/tour)를 띄워 둔다.
+준비: `auto` 는 Chrome 을 디버그 포트로 직접 띄운다. 수동으로 쓰려면 아래처럼 열고 tour 페이지를 띄워 둔다.
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222 --user-data-dir=D:\\chrome_vr
 
 사용:
+  python capture/naver_vr.py auto --url https://fin.land.naver.com/complexes/<번호>/tour --project <이름> --make-refs
   python capture/naver_vr.py list                      # 동 목록
   python capture/naver_vr.py run                       # 모든 동, 8방향
   python capture/naver_vr.py run --dongs 101,103 --angles 8 --width 0.4 --overlap 0.3
+
+auto 출력: projects/<이름>/photos/ (side/meta/complex), 선택 시 photo_refs.json, 새 프로젝트만 TASK.md,
+기존 프로젝트는 TASK.auto.md 제안. 기존 사진은 --overwrite 없이는 덮어쓰지 않는다.
 
 동작(동마다):
   1) 전체 보기에서 카메라를 그 동 라벨로 옮기고 라벨을 클릭 -> 포커스 모드(그 동만, 수평 카메라)
@@ -18,7 +22,7 @@
 
 출력(기본 capture/out/<단지번호>/): <동>_side<번호>.png (찍은 순서, 1부터), <동>_meta.json (각 사진의 각도·카메라 높이)
 """
-import argparse, json, math, os, re, sys, time, urllib.request
+import argparse, json, math, os, re, shutil, subprocess, sys, time, urllib.request
 from pathlib import Path
 
 import numpy as np
@@ -742,7 +746,13 @@ def cmd_overview(args):
 def capture_config(args):
     keys = ("fit_wall", "wall_frac", "min_wall", "wall_group_deg", "wall_depth_gap", "width",
             "overlap", "extra", "angles", "quality")
-    return {key: getattr(args, key) for key in keys}
+    cfg = {key: getattr(args, key) for key in keys}
+    ws = getattr(args, "window_size", None)
+    if ws:
+        cfg["window_size"] = ws
+    if getattr(args, "center", False):
+        cfg["center"] = True
+    return cfg
 
 
 def completed_capture(path, config):
@@ -971,6 +981,376 @@ def cmd_batch(args):
         log("[batch summary]")
         for cid, s in summary:
             log(f"  {cid}: {s}")
+
+
+# ---------------------------------------------------------------- auto: URL -> Chrome -> project photos -> TASK draft
+KIT = ROOT.parent
+PROJECTS = KIT / "projects"
+CHROME_STATE = ROOT / ".chrome-vr"
+
+
+def parse_tour_url(url):
+    """Naver VR tour URL -> (complex id, normalized tour URL). Other hosts are rejected."""
+    m = re.match(r"^https?://(?:fin|new)\.land\.naver\.com/complexes/(\d+)(?:[/?#].*)?$", (url or "").strip())
+    if not m:
+        raise ValueError("Naver VR tour URL only: https://fin.land.naver.com/complexes/<id>/tour")
+    cid = m.group(1)
+    return cid, f"https://fin.land.naver.com/complexes/{cid}/tour"
+
+
+def _debug_version(timeout=0.6):
+    try:
+        with urllib.request.urlopen(CDP + "/json/version", timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
+def find_chrome(explicit=None):
+    """Find chrome.exe without touching a running browser."""
+    if explicit:
+        p = Path(explicit).expanduser()
+        if p.is_file():
+            return p
+        raise SystemExit(f"[chrome] not a file: {p}")
+    cands = [os.environ.get("CHROME_PATH"), os.environ.get("GOOGLE_CHROME")]
+    for base in (os.environ.get("PROGRAMFILES"), os.environ.get("PROGRAMFILES(X86)"), os.environ.get("LOCALAPPDATA")):
+        if base:
+            cands.append(os.path.join(base, "Google", "Chrome", "Application", "chrome.exe"))
+    for c in cands:
+        if c and Path(c).is_file():
+            return Path(c)
+    if os.name == "nt":
+        try:
+            out = subprocess.check_output(["where", "chrome"], text=True, stderr=subprocess.DEVNULL)
+            for line in out.splitlines():
+                if Path(line.strip()).is_file():
+                    return Path(line.strip())
+        except Exception:
+            pass
+    else:
+        for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
+            p = shutil.which(name)
+            if p:
+                return Path(p)
+    return None
+
+
+def ensure_chrome(url, args):
+    """Reuse an existing debug session, or start Chrome with a dedicated profile. Returns the process we started."""
+    ver = _debug_version()
+    if ver:
+        log(f"[chrome] reuse existing debug session on 9222 ({ver.get('Browser', 'unknown')})")
+        return None
+    exe = find_chrome(args.chrome)
+    if not exe:
+        sys.exit("[chrome] chrome.exe not found - pass --chrome <path> or set CHROME_PATH")
+    profile = Path(args.chrome_profile).expanduser() if args.chrome_profile else CHROME_STATE
+    profile.mkdir(parents=True, exist_ok=True)
+    CHROME_STATE.mkdir(parents=True, exist_ok=True)
+    cmd = [str(exe), "--remote-debugging-port=9222", f"--user-data-dir={profile}",
+           "--no-first-run", "--no-default-browser-check", "--disable-popup-blocking",
+           f"--window-size={getattr(args, 'window_size', '2400,1800').replace('x', ',')}", url]
+    log("[chrome] " + " ".join(f'"{c}"' if " " in c else c for c in cmd))
+    flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    with open(CHROME_STATE / "chrome.log", "ab") as logf:
+        proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT, creationflags=flags)
+    (CHROME_STATE / "pid").write_text(str(proc.pid), encoding="ascii")
+    t0 = time.time()
+    while time.time() - t0 < args.chrome_wait:
+        if _debug_version():
+            log(f"[chrome] debug port ready in {time.time() - t0:.1f}s (pid {proc.pid})")
+            return proc
+        if proc.poll() is not None:
+            sys.exit("[chrome] exited before the debug port opened - see capture/.chrome-vr/chrome.log")
+        time.sleep(0.4)
+    stop_chrome(proc)
+    sys.exit("[chrome] debug port 9222 did not open - close other Chrome debug sessions or pass --chrome")
+
+
+def stop_chrome(proc):
+    """Only close the process this command started."""
+    if not proc or proc.poll() is not None:
+        return
+    log(f"[chrome] closing pid {proc.pid}")
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        proc.terminate()
+
+
+def open_or_reuse(p, url, cid, args):
+    """Reuse a tab that already shows this complex, otherwise open the tour URL."""
+    br = p.chromium.connect_over_cdp(CDP)
+    pg = None
+    for ctx in br.contexts:
+        for page in ctx.pages:
+            m = re.search(r"complexes/(\d+)", page.url)
+            if m and m.group(1) == cid:
+                pg = page
+                break
+        if pg:
+            break
+    if pg is not None and wait_tour(pg, timeout=8):
+        log("[page] reuse open tour")
+        return br, pg, None
+    ctx = br.contexts[0] if br.contexts else br.new_context()
+    if pg is None:
+        pg = ctx.new_page()
+    ok, xurl = open_tour(pg, url)
+    if not ok and args.on_blocked == "ask":
+        input("[page] tour not ready - clear any popup/login in Chrome, then press Enter...")
+        ok = wait_tour(pg)
+    if not ok:
+        sys.exit("[page] tour did not load (popup, network or a Naver change)")
+    return br, pg, xurl
+
+
+def ensure_project(name, template, dry_run):
+    """Create projects/<name> with project.py when missing; never touch an existing project's TASK/generator."""
+    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]*$", name or ""):
+        sys.exit("[project] use letters, digits, - and _ only, start with a letter/digit")
+    root = PROJECTS / name
+    if root.is_dir():
+        return root, False
+    if dry_run:
+        log(f"[project] would create projects/{name}")
+        return root, True
+    cmd = [sys.executable, str(KIT / "tools" / "project.py"), "new", name]
+    if template:
+        cmd += ["--template", template]
+    log("[project] " + " ".join(cmd))
+    subprocess.run(cmd, check=True)
+    if not root.is_dir():
+        sys.exit(f"[project] project.py did not create {root}")
+    return root, True
+
+
+def _refs_args(min_px=200.0):
+    return argparse.Namespace(ref_min_wall=1.0, ref_plane_deg=2.0, ref_plane_gap=0.05,
+                              min_cos=0.85, margin=0.02, min_h=6.0, min_px=min_px,
+                              per_wall=1, plan_mpp=0.25, debug=True, prefix="photos/")
+
+
+def build_refs(root, photos, dongs, min_px=200.0):
+    """One best planar view per exact plane, merged into the project's photo_refs.json."""
+    refs_args = _refs_args(min_px)
+    want = set(dongs)
+    merged = {"_schema": "naver-vr-planar-v2-auto",
+              "_help": "merged by naver_vr.py auto; sides are a guess - check/rename them",
+              "_paint": "paint_exclude uses normalized whole-entry wall coordinates: u=[left,right], v=[bottom,top]. Unknown cells stay unpainted.",
+              "facades": []}
+    sat = None
+    n = 0
+    for mf in sorted(photos.glob("*_meta.json")):
+        meta = json.loads(mf.read_text(encoding="utf-8"))
+        if meta.get("dong") not in want:
+            continue
+        one = make_refs_one(meta, photos, refs_args)
+        if one is None:
+            continue
+        merged["facades"].extend(one.get("facades", []))
+        if sat is None and one.get("satellite"):
+            sat = one["satellite"]
+        n += 1
+    if not merged["facades"]:
+        log("[refs] WARN no planar facades - existing photo_refs.json kept")
+        return None, 0
+    if sat:
+        merged["satellite"] = sat
+        merged["_satellite_note"] = "plan drawn from the first dong footprint; not a real roof photo"
+    out = root / "photo_refs.json"
+    if out.exists():
+        (root / "photo_refs.json.bak").write_text(out.read_text(encoding="utf-8"), encoding="utf-8")
+    out.write_text(json.dumps(merged, ensure_ascii=False, indent=1), encoding="utf-8")
+    log(f"[refs] {n} dongs -> {out} ({len(merged['facades'])} facades)")
+    if len(merged["facades"]) < max(2, len(want)):
+        log(f"[refs] WARN only {len(merged['facades'])} facades - inspect photos/refs_check/; "
+            f"try a larger --window-size or lower --refs-min-px")
+    return out, len(merged["facades"])
+
+
+def _is_unset(v):
+    v = (v or "").strip()
+    return not v or v.startswith("(")
+
+
+def render_task(text, facts):
+    """Fill only TASK fields that are empty or still hold the template placeholder."""
+    lines = []
+    for line in text.splitlines():
+        m = re.match(r"^([A-Za-z_]+):(.*)$", line)
+        if m and m.group(1) in facts and _is_unset(m.group(2)):
+            val = facts[m.group(1)]
+            if val not in (None, ""):
+                lines.append(f"{m.group(1)}: {val}")
+                continue
+        lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
+def find_blender_path():
+    cands = [os.environ.get("BLENDER_PATH")]
+    for base in (os.environ.get("PROGRAMFILES"), os.environ.get("PROGRAMFILES(X86)")):
+        if base:
+            for ver in ("Blender 5.2", "Blender 5.1", "Blender 5.0", "Blender 4.5", "Blender 4.4", "Blender 4.3", "Blender 4.2"):
+                cands.append(os.path.join(base, "Blender Foundation", ver, "blender.exe"))
+    for c in cands:
+        if c and Path(c).is_file():
+            return c
+    return None
+
+
+def task_facts(d, pois, args, floors):
+    n = len(pois)
+    name = (d.get("name") or "").strip()
+    facts = {
+        "building": f"{name} VR 캡처 ({n}동, 최고 {floors}층)",
+        "photos": "이 폴더 안에 모두 있음 (side로 시작하는 파일은 사이드뷰)",
+        "complex_name": name,
+        "floors": str(floors) if floors else None,
+        "known_facts": f"Naver VR 단지 {d.get('id')}, {n}동 캡처; fit_wall={bool(args.fit_wall)}, "
+                       f"angles={args.angles or (4 if args.fit_wall else 8)}",
+    }
+    if args.asset_name:
+        facts["name"] = args.asset_name
+    if args.region:
+        facts["region"] = args.region
+    if args.built_year:
+        facts["built_year"] = str(args.built_year)
+    blender = find_blender_path()
+    if blender:
+        facts["blender_path"] = blender
+    return facts
+
+
+def write_task(root, facts, mode, created):
+    """auto: write for a new project, propose for an existing one. write always keeps a .bak."""
+    if mode == "off":
+        return None
+    src = root / "TASK.md"
+    text = (src if src.exists() else KIT / "templates" / "TASK.md").read_text(encoding="utf-8")
+    rendered = render_task(text, facts)
+    if mode == "propose" or (mode == "auto" and not created):
+        out = root / "TASK.auto.md"
+        out.write_text(rendered, encoding="utf-8")
+        log(f"[task] suggestion -> {out} (TASK.md unchanged)")
+        return out
+    if src.exists():
+        (root / "TASK.md.bak").write_text(text, encoding="utf-8")
+    src.write_text(rendered, encoding="utf-8")
+    log(f"[task] wrote {src}")
+    return src
+
+
+def write_summary(photos, d, pois, args, done, failed, refs_path, refs_n, task_path, root):
+    data = {
+        "schema": "naver-vr-auto-v1",
+        "complex": {"id": d.get("id"), "name": d.get("name"), "url": args.url},
+        "captured_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "dongs": [{"name": q["name"], "floors": (q.get("floor") or {}).get("maxFloor")} for q in pois],
+        "capture": capture_config(args),
+        "done": done, "failed": failed,
+        "photos_dir": str(photos.relative_to(root)),
+        "refs": str(refs_path.relative_to(root)) if refs_path else None,
+        "refs_facades": refs_n,
+        "task": str(task_path.relative_to(root)) if task_path else None,
+    }
+    path = photos / "capture_summary.json"
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    return path
+
+
+def existing_capture_block(photos, pois, config):
+    """Dongs whose files were not made by the current resumable capture path. Never overwrite those silently."""
+    blocked = []
+    for q in pois:
+        name = safe_name(q["name"])
+        if not (photos / f"{name}_side1.png").exists():
+            continue
+        meta = photos / f"{name}_meta.json"
+        try:
+            m = json.loads(meta.read_text(encoding="utf-8")) if meta.exists() else {}
+        except (OSError, ValueError):
+            m = {}
+        if m.get("capture_config") is not None:
+            if not m.get("complete"):
+                continue                  # partial capture from this tool -> resume allowed
+            if m.get("capture_config") == config:
+                continue                  # run_complex skips an unchanged complete capture
+        blocked.append(name)
+    return blocked
+
+
+def cmd_auto(args):
+    """URL one-shot: start/reuse Chrome, capture into projects/<name>/photos, make refs, draft TASK.md."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        sys.exit("[auto] playwright is not installed - pip install playwright")
+    try:
+        cid, url = parse_tour_url(args.url)
+    except ValueError as ex:
+        sys.exit(f"[url] {ex}")
+    if args.asset_name and not re.match(r"^[A-Za-z][A-Za-z0-9]*$", args.asset_name):
+        sys.exit("[task] --asset-name: letters+digits only, start with a letter (no _ or space)")
+    template = None if args.template in (None, "slab") else args.template
+    root, created = ensure_project(args.project, template, args.dry_run)
+    photos = root / "photos"
+    proc = None
+    try:
+        proc = ensure_chrome(url, args)
+        with sync_playwright() as p:
+            br, pg, xurl = open_or_reuse(p, url, cid, args)
+            if proc is None:
+                try:
+                    w, h = [int(t) for t in str(args.window_size).lower().replace("x", ",").split(",")]
+                    pg.set_viewport_size({"width": w, "height": h})
+                    time.sleep(1.0)
+                except Exception as ex:
+                    log(f"[page] WARN viewport resize skipped: {type(ex).__name__}: {str(ex).splitlines()[0][:120]}")
+            d = load_xrx(pg, xurl)
+            if str(d.get("id")) != cid:
+                sys.exit(f"[url] page complex {d.get('id')} != URL {cid}")
+            want = [s.strip() for s in args.dongs.split(",")] if args.dongs else [q["name"] for q in d["poi"]]
+            pois = [q for q in d["poi"] if q["name"] in want]
+            if not pois:
+                sys.exit(f"[dongs] none of {want} in complex {cid}")
+            floors = max([(q.get("floor") or {}).get("maxFloor") or 0 for q in pois] + [0])
+            log(f"[auto] complex {cid} {d.get('name')} dongs {[q['name'] for q in pois]} floors {floors}")
+            if args.dry_run:
+                summary = {"status": "DRY_RUN", "project": args.project, "created": created,
+                           "complex": {"id": cid, "name": d.get("name"), "url": url},
+                           "dongs": [{"name": q["name"], "floors": (q.get("floor") or {}).get("maxFloor")} for q in pois],
+                           "photos_dir": str(photos), "make_refs": args.make_refs, "task": args.task}
+                log(json.dumps(summary, ensure_ascii=False) if args.json else json.dumps(summary, ensure_ascii=False, indent=1))
+                return
+            photos.mkdir(parents=True, exist_ok=True)
+            if not args.overwrite:
+                blocked = existing_capture_block(photos, pois, capture_config(args))
+                if blocked:
+                    sys.exit(f"[photos] existing captures {blocked} in {photos} - use a new --project, or pass --overwrite")
+            done, failed = run_complex(pg, d, photos, args, url)
+            if not failed:
+                (photos / "DONE").write_text(json.dumps({"ok": done, "fail": []}, ensure_ascii=False), encoding="utf-8")
+            else:
+                (photos / "DONE").unlink(missing_ok=True)
+            refs_path, refs_n = (build_refs(root, photos, done, args.refs_min_px)
+                                 if (args.make_refs and done) else (None, 0))
+            task_path = write_task(root, task_facts(d, pois, args, floors), args.task, created)
+            write_summary(photos, d, pois, args, done, failed, refs_path, refs_n, task_path, root)
+            summary = {"status": "OK" if not failed else "PARTIAL", "project": args.project,
+                       "complex": {"id": cid, "name": d.get("name")},
+                       "dongs": done, "failed": failed,
+                       "photos": str(photos), "refs": str(refs_path) if refs_path else None,
+                       "refs_facades": refs_n,
+                       "task": str(task_path) if task_path else None,
+                       "next": f"python tools/agent.py doctor --project {args.project} --json"}
+            log(json.dumps(summary, ensure_ascii=False) if args.json else json.dumps(summary, ensure_ascii=False, indent=1))
+    finally:
+        if args.close_chrome and proc is not None:
+            stop_chrome(proc)
 
 
 def cmd_probe(args):
@@ -1288,6 +1668,28 @@ def cmd_make_refs(args):
                     pl["best_px_per_m"] if pl["best_px_per_m"] else "-", note))
 
 
+def add_capture_args(x, with_out=True):
+    x.add_argument("--overwrite", action="store_true", help="같은 설정으로 완료한 동도 다시 캡처")
+    x.add_argument("--fit-wall", action="store_true", help="벽마다 정면으로 찍는다(8방향 대신). 외곽선 데이터가 있어야 함")
+    x.add_argument("--wall-frac", type=float, default=None,
+                   help="--fit-wall: 면 폭 / 화면 폭으로 더 가까이 (기본: 안 씀 = --width 기준. 0.8 이면 해상도는 높지만 사진 수가 몇 배)")
+    x.add_argument("--min-wall", type=float, default=4.0, help="--fit-wall: 이보다 좁은 면(m)은 건너뜀")
+    x.add_argument("--wall-group-deg", type=float, default=20.0, help="--fit-wall: 이 각도 안의 같은 방향 변은 한 면으로")
+    x.add_argument("--wall-depth-gap", type=float, default=3.0, help="--fit-wall: 깊이 차가 이보다 크면 다른 면(ㄱ자 날개 등)")
+    x.add_argument("--overview", action="store_true", help="동 촬영 전에 단지 전체 사진(danji_<k>.png, 글자 숨김)도 찍는다")
+    x.add_argument("--overview-angles", type=int, default=4, help="--overview 방향 수")
+    x.add_argument("--dongs", help="쉼표로 구분 (기본: 전부)")
+    x.add_argument("--width", type=float, default=0.4, help="건물 폭 / 화면 폭")
+    x.add_argument("--overlap", type=float, default=0.3)
+    x.add_argument("--extra", type=float, default=0.05, help="맨 위·맨 아래를 화면 높이의 이만큼 더 이동")
+    x.add_argument("--center", action="store_true",
+                   help="이동 범위 중앙에서 한 장만 찍는다(전체 면을 한 프레임에 담을 때)")
+    x.add_argument("--angles", type=int, default=None, help="방향 수 (기본 8, --fit-wall 이면 4 = 가장 긴 면 정면부터 90도씩)")
+    x.add_argument("--quality", default="고화질", help="화질 버튼 값 (빈 문자열이면 그대로)")
+    if with_out:
+        x.add_argument("--out")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -1296,25 +1698,29 @@ def main():
     b = sp.add_parser("batch", help="여러 단지 URL 차례로")
     b.add_argument("urls", nargs="*")
     b.add_argument("--file", help="URL 목록 파일(한 줄에 하나)")
+    au = sp.add_parser("auto", help="URL 하나로 Chrome 실행 -> 프로젝트 photos 캡처 -> refs/TASK 초안")
+    au.add_argument("--url", required=True, help="https://fin.land.naver.com/complexes/<id>/tour")
+    au.add_argument("--project", required=True, help="projects/<name> (폴더 이름, 실제 단지명 금지)")
+    au.add_argument("--template", choices=["slab", "cw", "generic"], default=None, help="새 프로젝트일 때만")
+    au.add_argument("--asset-name", help="TASK name: 영문+숫자, 밑줄/공백 금지")
+    au.add_argument("--region")
+    au.add_argument("--built-year", type=int)
+    au.add_argument("--task", choices=["auto", "write", "propose", "off"], default="auto",
+                    help="auto: 새 프로젝트만 write, 기존 프로젝트는 TASK.auto.md 제안")
+    au.add_argument("--make-refs", action="store_true")
+    au.add_argument("--dry-run", action="store_true")
+    au.add_argument("--json", action="store_true")
+    au.add_argument("--chrome", help="chrome.exe path")
+    au.add_argument("--chrome-profile", help="dedicated --user-data-dir")
+    au.add_argument("--chrome-wait", type=float, default=25.0, help="seconds to wait for port 9222")
+    au.add_argument("--window-size", default="2400,1800", help="Chrome window WxH (bigger = more ref pixels)")
+    au.add_argument("--refs-min-px", type=float, default=200.0, help="--make-refs: minimum wall width in px")
+    au.add_argument("--on-blocked", choices=["fail", "ask"], default="fail")
+    au.add_argument("--close-chrome", action="store_true", help="auto 가 띄운 Chrome 만 종료")
+    add_capture_args(au, with_out=False)
+    au.set_defaults(out=None)
     for x in (r, b):
-        x.add_argument("--overwrite", action="store_true", help="같은 설정으로 완료한 동도 다시 캡처")
-        x.add_argument("--fit-wall", action="store_true", help="벽마다 정면으로 찍는다(8방향 대신). 외곽선 데이터가 있어야 함")
-        x.add_argument("--wall-frac", type=float, default=None,
-                       help="--fit-wall: 면 폭 / 화면 폭으로 더 가까이 (기본: 안 씀 = --width 기준. 0.8 이면 해상도는 높지만 사진 수가 몇 배)")
-        x.add_argument("--min-wall", type=float, default=4.0, help="--fit-wall: 이보다 좁은 면(m)은 건너뜀")
-        x.add_argument("--wall-group-deg", type=float, default=20.0, help="--fit-wall: 이 각도 안의 같은 방향 변은 한 면으로")
-        x.add_argument("--wall-depth-gap", type=float, default=3.0, help="--fit-wall: 깊이 차가 이보다 크면 다른 면(ㄱ자 날개 등)")
-        x.add_argument("--overview", action="store_true", help="동 촬영 전에 단지 전체 사진(danji_<k>.png, 글자 숨김)도 찍는다")
-        x.add_argument("--overview-angles", type=int, default=4, help="--overview 방향 수")
-        x.add_argument("--dongs", help="쉼표로 구분 (기본: 전부)")
-        x.add_argument("--width", type=float, default=0.4, help="건물 폭 / 화면 폭")
-        x.add_argument("--overlap", type=float, default=0.3)
-        x.add_argument("--extra", type=float, default=0.05, help="맨 위·맨 아래를 화면 높이의 이만큼 더 이동")
-        x.add_argument("--center", action="store_true",
-                       help="이동 범위 중앙에서 한 장만 찍는다(전체 면을 한 프레임에 담을 때)")
-        x.add_argument("--angles", type=int, default=None, help="방향 수 (기본 8, --fit-wall 이면 4 = 가장 긴 면 정면부터 90도씩)")
-        x.add_argument("--quality", default="고화질", help="화질 버튼 값 (빈 문자열이면 그대로)")
-        x.add_argument("--out")
+        add_capture_args(x)
     ov = sp.add_parser("overview", help="단지 전체 사진만 (글자·아이콘·매물 강조 숨김)")
     ov.add_argument("--angles", type=int, default=4, help="방향 수 (4 = 90도씩, 8 = 45도씩)")
     ov.add_argument("--quality", default="고화질")
@@ -1339,7 +1745,8 @@ def main():
     m.add_argument("--quiet", action="store_true", help="do not print the coverage table")
     m.add_argument("--debug", action="store_true", help="refs_check/ 에 꼭짓점을 그린 사진 저장")
     a = ap.parse_args()
-    {"list": cmd_list, "run": cmd_run, "batch": cmd_batch, "make_refs": cmd_make_refs, "probe": cmd_probe, "overview": cmd_overview}[a.cmd](a)
+    {"list": cmd_list, "run": cmd_run, "batch": cmd_batch, "auto": cmd_auto, "make_refs": cmd_make_refs,
+     "probe": cmd_probe, "overview": cmd_overview}[a.cmd](a)
 
 
 if __name__ == "__main__":

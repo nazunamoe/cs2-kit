@@ -18,6 +18,7 @@ tools/blender_py.txt
 /output/
 /capture/out/
 /capture/urls_*.txt
+/capture/.chrome-vr/
 
 # 편집기/OS
 .claude/

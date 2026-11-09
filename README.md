@@ -72,10 +72,13 @@ python tools/agent.py glb-mass --project my-building --json -- photos/scan.glb -
 `capture/naver_vr.py`는 동별 다방면 사진과 camera·평면 메타데이터를 저장합니다. `make_refs`는 최대 20°·3 m 차이를 한 벽으로 합치지 않고, 실제로 같은 평면인 연속 변만 골라 정확한 네 모서리를 만듭니다. 벽마다 정면성·보이는 높이·해상도가 가장 좋은 사진 한 장을 기본 선택합니다.
 
 ```bash
+python capture/naver_vr.py auto --url https://fin.land.naver.com/complexes/<번호>/tour --project <name> --make-refs
 python capture/naver_vr.py run --dongs 101 --fit-wall --angles 4
 python capture/naver_vr.py make_refs --dir capture/out/<complex> --dongs 101 --prefix photos/ --debug
 python tools/band_scan.py --refs photo_refs.json --name 101_p1_1 --fh 2.9 --out previews/paint_grid
 ```
+
+`auto`는 URL 하나로 Chrome 디버그 모드를 띄우고, `projects/<name>/photos`에 바로 캡처하며, 새 프로젝트만 TASK.md를 채우고 기존 프로젝트에는 `TASK.auto.md` 제안만 남깁니다. 기존 사진은 `--overwrite` 없이는 덮어쓰지 않습니다.
 
 `make_refs --report work/refs_report.json`을 돌리면 **어느 평면이 사진 없이 남았는지**, 사진이
 부족한 이유, 평면별 해상도(px/m)를 한눈에 볼 수 있습니다. 창 폭을 읽으려면 20 px/m 이상이
