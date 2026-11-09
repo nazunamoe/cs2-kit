@@ -37,6 +37,18 @@ python tools/project.py new my-building --template generic
 2. `TASK.md`에 아는 정보를 적고, 모르는 값은 비워 둡니다.
 3. 실제 단지 이름·브랜드·로고는 에셋 이름과 텍스처에 사용하지 않습니다.
 
+### 작업 방법 선택
+
+입력이 무엇이냐에 따라 시작점이 다릅니다. 아래 세 가지가 기본 경로입니다.
+
+| 방법 | 준비물 | 강점 | 시작 명령 |
+|---|---|---|---|
+| 1. 네이버 VR + GLB | 투어 URL, 선택적 `3dview.glb` | 여러 동·다면 사진, camera·평면 메타, 매스 자동 재구성 | `capture/naver_vr.py auto` → `agent.py glb-mass` |
+| 2. 로드뷰·직접 촬영 | 정면·모서리·디테일 3~8장 | 실제 색·재질·창·저층부·입구 | `agent.py evidence`, `agent.py observe` |
+| 3. 자연어 + 사진 | 시대·유형·층수 설명 + 사진 | 빠른 스타일·층수·창 계열 초안 | `tools/brief.py` |
+
+세 방법 모두 같은 quick/visual/final 게이트를 통과해야 합니다. 사진 증거가 없는 항목은 `NOT_APPLICABLE`로 남고 PASS로 바뀌지 않습니다.
+
 ### GLB가 있으면 매스부터 자동 재구성
 
 전체 가로·세로·높이만 참고하지 않고, 여러 높이에서 자른 외곽선을 단순화해 L자·각진 평면과 단차 볼륨을 `generic_spec.json`으로 만듭니다.
@@ -256,6 +268,7 @@ Windows에서는 PowerShell 7과 UTF-8을 권장합니다. 네이티브 편집�
 - [측정 기반 파사드](docs/agent/FACADE_MEASURED.md)
 - [입면 작업 노하우](docs/agent/FACADE_KNOWHOW.md)
 - [GLB 기반 매스 재구성](docs/agent/GLB_MASS.md)
+- [네이버 VR 캡처와 도색 refs](docs/agent/NAVER_VR.md)
 - [GLB 없는 사진 증거 작업](docs/agent/PHOTO_ONLY.md)
 - [파사드 스타일과 브리프](templates/styles/README.md)
 - [360 사진 원근 크롭](docs/agent/PANORAMA_360.md)
