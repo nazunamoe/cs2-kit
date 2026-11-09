@@ -4,6 +4,8 @@
   python tools/shadow_norm.py --image photos/ref101/101_stitched_p16.png \
     --out photos/ref101/101_stitched_p16_lit.png
 
+  python tools/shadow_norm.py --refs photo_refs.json --out-refs photo_refs_lit.json
+
 Method: the brightest percentile of the image is treated as the white wall
 reference. Each block gets its own gain from its own bright pixels, the gain map
 is smoothed, and every pixel is scaled by it. Shadowed blocks brighten toward
@@ -18,6 +20,14 @@ import sys
 
 import numpy as np
 from PIL import Image
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from proj import ROOT, KIT, NAME  # noqa: E402,F401  (project folder; chdir done)
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
 
@@ -61,11 +71,16 @@ def main():
     ap.add_argument("--dir", help="folder of images")
     ap.add_argument("--out", help="output file (single image) or folder (with --dir)")
     ap.add_argument("--suffix", default="_lit", help="output name suffix for --dir")
+    ap.add_argument("--refs", help="photo_refs json: normalize every referenced image and write a new refs json")
+    ap.add_argument("--out-refs", help="where to write the new refs json (default: <refs>_lit.json)")
     ap.add_argument("--block", type=int, default=64, help="block size in px for the gain map")
     ap.add_argument("--max-gain", type=float, default=1.8)
     ap.add_argument("--bright-pct", type=float, default=92.0)
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
+
+    if a.refs:
+        return refs_mode(a)
 
     files = list(a.image or [])
     if a.dir:
@@ -96,6 +111,53 @@ def main():
                   + (f"  ({stats['skipped']})" if stats["skipped"] else ""))
     if a.json:
         print(json.dumps({"status": "OK", "images": results}, ensure_ascii=False))
+    return 0
+
+
+def refs_mode(a):
+    """Normalize every image a photo_refs.json points at and write a new refs json."""
+    with open(a.refs, encoding="utf-8-sig") as f:
+        refs = json.load(f)
+    out_refs = a.out_refs or (os.path.splitext(a.refs)[0] + "_lit.json")
+    cache = {}
+    results = []
+    changed = 0
+    for entry in refs.get("facades", []):
+        path = entry.get("file")
+        if not path:
+            continue
+        if not os.path.isfile(path):
+            results.append({"in": path, "status": "missing"})
+            continue
+        if path in cache:
+            entry["file"] = cache[path]
+            continue
+        im = Image.open(path).convert("RGB")
+        out_img, stats = normalize(np.asarray(im), a.block, max_gain=a.max_gain, bright_pct=a.bright_pct)
+        folder = os.path.dirname(path)
+        stem, _ = os.path.splitext(os.path.basename(path))
+        dest = os.path.join(folder, f"{stem}{a.suffix}.png")
+        Image.fromarray(out_img).save(dest)
+        dest = dest.replace("\\", "/")          # keep refs portable across platforms
+        cache[path] = dest
+        entry["file"] = dest
+        changed += 1
+        stats.update({"in": path, "out": dest, "status": "OK" if not stats["skipped"] else stats["skipped"]})
+        results.append(stats)
+        if not a.json:
+            print(f"[shadow] {path} -> {dest}  white {stats['white']} gain {stats['gain_min']}~{stats['gain_max']}"
+                  + (f"  ({stats['skipped']})" if stats["skipped"] else ""))
+    refs["_help"] = (refs.get("_help", "") + " | shadow-normalized (tools/shadow_norm.py): "
+                      "shadowed areas lifted to the lit wall colour, for colour measurement only").strip(" |")
+    refs["_shadow_norm"] = {"source_refs": a.refs, "block": a.block, "max_gain": a.max_gain,
+                            "bright_pct": a.bright_pct, "suffix": a.suffix,
+                            "note": "use for albedo/paint measurement, not as a display photo"}
+    with open(out_refs, "w", encoding="utf-8") as f:
+        json.dump(refs, f, ensure_ascii=False, indent=1)
+    if not a.json:
+        print(f"[shadow] {changed} image(s) normalized, refs -> {out_refs}")
+    if a.json:
+        print(json.dumps({"status": "OK", "refs": out_refs, "images": results}, ensure_ascii=False))
     return 0
 
 
