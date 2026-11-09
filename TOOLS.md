@@ -87,7 +87,8 @@ python tools/extract_texture.py photos/front.jpg --pts 812,402,1290,380,1302,905
 ## Facade and scan readers
 
 - `facade_paint.py floors|windows|paint|all`: reads one wall from `photo_refs.json`; verify generated images visually.
-- `facade_read.py`: normalized U/V facade output; v1, synthetic-image validation only.
+- `facade_read.py`: normalized U/V facade output plus a combined `facade_read.json`; `--json` prints one machine-readable blob. v1, synthetic-image validation only.
+- `tools/qa/plane_compare.py`: register the capture camera, warp photo and model onto the same plane, and score each plane with block SSIM + edge overlap. Failing scores are written to `work/plane_compare/photo_mismatch_notes.yaml` and can be appended to the spec with `--spec`; `--strict` exits 1 on a miss.
 - `band_scan.py`: paint grid/palette with window and normalized U/V exclusion masks; unknown cells stay `-1` and unpainted. Verify `_mask.png` and real photos.
 - `capture/naver_vr.py`: repeatable VR capture, safe resume, camera-matrix planar refs. `make_refs` defaults to one best view per exact plane. See `docs/agent/NAVER_VR.md`.
 - `glb_measure.py scan.glb --list`, then `--mesh`/`--box`: overall dimensions and elevations.
@@ -98,7 +99,7 @@ python tools/extract_texture.py photos/front.jpg --pts 812,402,1290,380,1302,905
 - `video_frames.py --video walk.mp4`: extract frames from a walkthrough video and add them as photos. See `docs/agent/VIDEO_FRAMES.md`.
 - `crop_360.py --image pan.jpg --yaws 0,90`: perspective crops from a 360/equirectangular photo. See `docs/agent/PANORAMA_360.md`.
 - `ifc_to_glb.py --check|--plan`: available IFC/BIM converters and the conversion route to GLB. See `docs/agent/IFC_TO_GLB.md`.
-- `lod_auto.py`: main `.blend`에서 LOD1/LOD2 후보를 만들고 `lod_check`로 구멍을 확인. 후보는 생성기 최종 LOD를 대체하지 않음. See `docs/agent/LOD_AUTO.md`.
+- `lod_auto.py`: main `.blend`에서 LOD1/LOD2 후보를 만들고 `lod_check`로 구멍을 확인. `--max-tris`/`--max-lod1-tris` 하드 상한과 UV 아틀라스 범위 검사를 함께 본다. 후보는 생성기 최종 LOD를 대체하지 않음. See `docs/agent/LOD_AUTO.md`.
 - `tools/photo_facade/`: one legacy generator structure only; do not use on unrelated generators.
 
 Scans are measurement references. Never copy their geometry or textures into the asset.
@@ -140,6 +141,20 @@ V1 limitations: piloti depth is simplified; facade_read/band_scan need real-phot
 - `docs/agent/VOLUMES.md`: `--template generic`, arbitrary polygon volumes, wall features, volume LODs, and manifest wall metadata.
 - `tools/evidence.py`: photo/feature/validate ledger commands; normally called through `agent.py evidence`.
 - `K.volume_prism`, `K.build_volume_spec`, `K.wall_quad`: generic geometry API. `export_asset(..., metadata=...)` stores wall/volume metadata for photo alignment.
+
+## Repository sync
+
+```bash
+python tools/sync_branches.py                       # fetch, fast-forward local branches, report drift
+python tools/sync_branches.py --check --json        # no writes; exit 1 on any drift
+python tools/sync_branches.py --branches opencode_work claude
+```
+
+The tool only fast-forwards: it never rebases, merges, force-pushes, or pushes. A branch
+ahead of its remote or diverged from it is reported (`DRIFT`, exit 1). Cross-branch counts
+show commits that exist on one branch but not the other, which is how a commit made on
+`opencode_work` is noticed before it is cherry-picked to `claude`. Commit subjects should
+use `feat:`, `fix:`, `docs:`, `perf:`, `refactor:`, `test:`, or `chore:`.
 
 ## Known limits
 

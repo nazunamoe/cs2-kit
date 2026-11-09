@@ -139,6 +139,15 @@ python tools/qa/plane_compare.py --project my-building \
 - 비교 단위는 **밴드(사진 한 장)**다. 여러 밴드를 이어붙인 평면은 카메라가 한 장이므로
   밴드 refs로 비교한다(이어붙인 ref에 `source_file`을 지정해 카메라를 잡아줄 수도 있다).
 - `--z0/--z1`로 높이 구간만 뽑아 비교할 수 있다(기본은 ref 자신의 밴드).
+- 각 평면은 **블록 SSIM + 엣지 겹침(edge_iou)** 으로 자동 채점된다. 점수는
+  `work/plane_compare/scores.json`에 항상 남고, 임계값(`--min-ssim` 기본 0.30,
+  `--min-edge-iou` 기본 0.25) 미달이면 `work/plane_compare/photo_mismatch_notes.yaml`에
+  기록된다. `--spec building_spec_<Name>.yaml`을 주면 실패 항목이 그 YAML의
+  `photo_mismatch_notes` 아래에 append된다(기존 주석은 건드리지 않음, 같은 점수는 중복
+  기록하지 않음). `--strict`면 미달 시 exit 1, `--json`이면 기계 판독용 요약을 출력한다.
+- **기본 임계값은 추정값이다.** 조명·텍스처 차이 때문에 SSIM은 낮게 나오기 쉬우니,
+  캡처마다 비교 시트를 눈으로 보고 임계값을 조정한다. 점수는 "창 개수·위치가 맞는지"의
+  대체물이 아니라 회귀 감시용이다.
 
 ## 5. Per-cell paint
 

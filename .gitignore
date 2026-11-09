@@ -24,3 +24,6 @@ tools/blender_py.txt
 .claude/
 .DS_Store
 Thumbs.db
+
+# 로컬 검토 메모 (커밋하지 않음)
+REMAINING_improvements_*.md

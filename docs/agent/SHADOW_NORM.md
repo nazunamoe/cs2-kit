@@ -28,11 +28,24 @@ python tools/shadow_norm.py --project my-building \
 
 ## Method
 
-1. The 98th luminance percentile is the white-wall reference.
+1. The 98th luminance percentile is the white-wall reference. With `--patch-median` the
+   reference is the **median of five patches** (four corners and the centre), which is less
+   pulled down by a large shadowed area or a bright sky than a single whole-image value.
 2. The image is split into 64 px blocks; each block's 92nd percentile is its bright wall value.
 3. `gain = white / block_bright`, clamped to `1.0 .. --max-gain` (default 1.8).
 4. The block gain map is resized smoothly to full resolution and multiplied into RGB.
 5. Images with no bright reference (white < 45) are skipped.
+
+```bash
+python tools/shadow_norm.py --image photos/wall.png --out photos/wall_lit.png --patch-median
+python tools/shadow_norm.py --refs photo_refs.json --out-refs photo_refs_lit.json \
+  --patch-median --patch-frac 0.18 --json
+```
+
+`--patch-frac` is the patch size as a fraction of the shorter side (default 0.18). The
+stats (`white_patches`, `white_mode`) show whether the patch median or the global value
+was used. Patch median helps when one large dark region dominates the frame; if every
+patch lands on a window or the sky, check the values before trusting them.
 
 Only luminance is normalized. Colour temperature (warm/cool cast) is preserved.
 

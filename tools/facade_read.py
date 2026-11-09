@@ -245,6 +245,7 @@ def main():
     ap.add_argument("--window-mode", default="auto")
     ap.add_argument("--plane-map", help="photo_plane_map.py 결과 json -> 열을 모델 벽 미터로 옮겨 적는다")
     ap.add_argument("--table", action="store_true", help="생성기용 columns 표도 같이 쓴다")
+    ap.add_argument("--json", action="store_true", help="기계 판독용 JSON 한 덩어리로 출력(개별 <name>.json 도 그대로 쓴다)")
     ap.add_argument("--out", default="previews/facade_read")
     a = ap.parse_args()
 
@@ -254,12 +255,15 @@ def main():
     plane_map = json.load(open(a.plane_map, encoding="utf-8")) if a.plane_map else None
     os.makedirs(a.out, exist_ok=True)
     tables = {}
+    summary = []
     for e in refs.get("facades", []):
         name = e.get("name") or e.get("side")
         try:
             r = read_one(a.refs, name, a.wall_size, a.ppm, a.fh, a.window_mode, plane_map)
         except SystemExit as ex:
-            print("SKIP %s: %s" % (name, ex))
+            if not a.json:
+                print("SKIP %s: %s" % (name, ex))
+            summary.append({"name": name, "error": str(ex)})
             continue
         deg = e.get("normal_deg", e.get("azimuth_deg"))
         r["normal_deg"] = deg
@@ -269,23 +273,30 @@ def main():
         outp = os.path.join(a.out, "%s.json" % name)
         with open(outp, "w", encoding="utf-8") as f:
             json.dump(r, f, ensure_ascii=False, indent=1)
+        summary.append({"name": name, "file": outp, "floors": len(r["rows"]),
+                        "windows": len(r["columns"]), "pitch_m": r["pitch_m"],
+                        "window_mode": r["window_mode"], "normal_deg": deg,
+                        "glb_wall_id": glb_id, "warnings": r.get("warnings", [])})
         cols = r["columns"]
         mapped = r.get("model", {})
         shown = mapped["columns"] if mapped.get("mapped") else cols
-        print("%-16s floors=%-3d windows=%-3d pitch=%.2fm mode=%s -> %s"
-              % (name, len(r["rows"]), len(cols), r["pitch_m"], r["window_mode"].split(":")[0], outp))
+        if not a.json:
+            print("%-16s floors=%-3d windows=%-3d pitch=%.2fm mode=%s -> %s"
+                  % (name, len(r["rows"]), len(cols), r["pitch_m"], r["window_mode"].split(":")[0], outp))
         for c in shown:
             where = ""
             if mapped.get("mapped"):
                 where = "  edge_m %5.2f..%5.2f" % (c["edge_m"][0], c["edge_m"][1])
-            print("      u %5.3f..%5.3f  w %4.2f m  h %4.2f m  %-8s%s"
-                  % (c["u"][0], c["u"][1], c["w"], c["h"], c["hint"], where))
+            if not a.json:
+                print("      u %5.3f..%5.3f  w %4.2f m  h %4.2f m  %-8s%s"
+                      % (c["u"][0], c["u"][1], c["w"], c["h"], c["hint"], where))
         for c in mapped.get("louver_candidates", []) if mapped.get("mapped") else r["louver_candidates"]:
             where = ""
             if mapped.get("mapped"):
                 where = "  edge_m %5.2f..%5.2f" % (c["edge_m"][0], c["edge_m"][1])
-            print("      u %5.3f..%5.3f  w %4.2f m  %-8s%s  (%.0f lines/floor over %d floors)"
-                  % (c["u"][0], c["u"][1], c["w"], c["hint"], where, c["lines_per_floor"], c["floors"]))
+            if not a.json:
+                print("      u %5.3f..%5.3f  w %4.2f m  %-8s%s  (%.0f lines/floor over %d floors)"
+                      % (c["u"][0], c["u"][1], c["w"], c["hint"], where, c["lines_per_floor"], c["floors"]))
         if mapped.get("mapped"):
             wid = mapped["wall_id"]
             table = tables.setdefault(wid, {"edge": mapped["edge"], "mirrored": mapped["mirrored"],
@@ -294,8 +305,9 @@ def main():
                 table["columns"].append((c["hint"], c["edge_m"][0], c["edge_m"][1]))
             for c in mapped.get("louver_candidates", []):
                 table["columns"].append((c["hint"], c["edge_m"][0], c["edge_m"][1]))
-        for w in r.get("warnings", []):
-            print("      WARN %s" % w)
+        if not a.json:
+            for w in r.get("warnings", []):
+                print("      WARN %s" % w)
     if a.table and tables:
         tp = os.path.join(a.out, "columns_table.py")
         with open(tp, "w", encoding="utf-8") as f:
@@ -308,9 +320,18 @@ def main():
                     f.write("        (%r, %.2f, %.2f),\n" % (kind, a0, a1))
                 f.write("    ],\n")
             f.write("}\n")
-        print("\nwrote %s" % tp)
-        for wid, t in tables.items():
-            print("  %-16s %d column(s)" % (wid, len(t["columns"])))
+        if not a.json:
+            print("\nwrote %s" % tp)
+            for wid, t in tables.items():
+                print("  %-16s %d column(s)" % (wid, len(t["columns"])))
+    combined = os.path.join(a.out, "facade_read.json")
+    with open(combined, "w", encoding="utf-8") as f:
+        json.dump({"status": "OK", "refs": a.refs, "planes": plane_map is not None,
+                   "walls": summary}, f, ensure_ascii=False, indent=1)
+    if a.json:
+        print(json.dumps({"status": "OK", "out": a.out, "combined": combined,
+                          "walls": summary}, ensure_ascii=False))
+    return 0
 
 
 if __name__ == "__main__":
