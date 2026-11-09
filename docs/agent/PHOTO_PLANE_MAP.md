@@ -104,7 +104,8 @@ if mirrored:
 
 - `tools/facade_read.py` — 평면 사진에서 창 열을 읽는다. 이 도구의 `photo_left_m`/`mirrored`로
   열 좌표를 모델 미터에 붙인다.
-- `tools/qa/plane_compare.py` — 같은 평면을 사진/모델로 나란히 비교.
+- `tools/qa/plane_compare.py` — 같은 평면을 사진/모델로 나란히 비교하고 SSIM·엣지 겹침으로 채점.
+  미달 항목은 `work/plane_compare/photo_mismatch_notes.yaml`에 남고 `--spec`으로 명세에 append된다.
 
 ## 한계
 

@@ -119,8 +119,8 @@ python tools/qa/plane_compare.py --project my-building --asset output/<asset> \
 ```
 
 - `photo_plane_map`: 사진 평면마다 **덮는 모델 벽·미터 오프셋·좌우 반전·실제 해상도(px/m)**를 알려줍니다.
-- `facade_read`: 평면 사진에서 창 열을 **미터로** 읽고, 루버 밴드를 찾고, 생성기용 표를 씁니다.
-- `plane_compare`: 같은 평면을 사진/모델로 나란히 비교해 입면이 맞는지 봅니다.
+- `facade_read`: 평면 사진에서 창 열을 **미터로** 읽고, 루버 밴드를 찾고, 생성기용 표와 `facade_read.json`을 씁니다(`--json`은 기계 판독용 요약).
+- `plane_compare`: 같은 평면을 사진/모델로 나란히 비교하고 **블록 SSIM·엣지 겹침으로 자동 채점**합니다. 임계값 미달은 `photo_mismatch_notes.yaml`에 기록되고 `--spec`으로 명세에 append됩니다.
 
 해상도가 낮으면(창 폭 측정에 20 px/m 미만) 그 사진으로는 창 폭을 읽을 수 없으니 다시 캡쳐해야 합니다.
 자세한 내용은 [사진 평면 → 모델 벽 매핑](docs/agent/PHOTO_PLANE_MAP.md)을 참고하세요.

@@ -35,6 +35,34 @@ def tri_count(ob):
     ob.data.calc_loop_triangles()
     return len(ob.data.loop_triangles)
 
+def uv_stats(ob, src=None):
+    me = ob.data
+    uvl = me.uv_layers.active
+    if uvl is None or not len(uvl.data):
+        return {"has_uv": False}
+    data = uvl.data
+    us = [d.uv[0] for d in data]
+    vs = [d.uv[1] for d in data]
+    lo, hi = [min(us), min(vs)], [max(us), max(vs)]
+    me.calc_loop_triangles()
+    degen = 0
+    for t in me.loop_triangles:
+        p = [data[i].uv for i in t.loops]
+        area = abs((p[1][0] - p[0][0]) * (p[2][1] - p[0][1])
+                   - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]))
+        if area < 1e-9:
+            degen += 1
+    out = {"has_uv": True, "lo": [round(lo[0], 6), round(lo[1], 6)],
+           "hi": [round(hi[0], 6), round(hi[1], 6)], "degenerate": degen,
+           "tris": len(me.loop_triangles)}
+    if src is not None:
+        eps = 1e-4
+        out["outside_source"] = sum(
+            1 for u, v in zip(us, vs)
+            if (u < src["lo"][0] - eps or u > src["hi"][0] + eps
+                or v < src["lo"][1] - eps or v > src["hi"][1] + eps))
+    return out
+
 main = bpy.data.objects.get(name)
 if main is None or main.type != "MESH":
     meshes = [o for o in bpy.data.objects if o.type == "MESH"]
@@ -81,6 +109,7 @@ if cap_bottom:
         main.data.update()
     bm.free()
 main_tris = tri_count(main)
+src_uv = uv_stats(main)
 
 def make_lod(suffix, ratio):
     dup = main.copy()
@@ -106,6 +135,7 @@ bpy.ops.wm.save_as_mainfile(filepath=out, copy=True)
 result = {"main_tris": main_tris, "lod1_tris": tri_count(lod1), "lod2_tris": tri_count(lod2),
           "lod1_ratio": lod1_ratio, "lod2_target": lod2_tris, "out": out,
           "capped_edges": capped,
+          "uv": {"main": src_uv, "lod1": uv_stats(lod1, src_uv), "lod2": uv_stats(lod2, src_uv)},
           "objects": [cand, cand + "_LOD1", cand + "_LOD2"]}
 print("LOD_AUTO_DONE " + json.dumps(result))
 '''
@@ -164,6 +194,10 @@ def main():
     ap.add_argument("--out", help="candidate folder (default: <asset folder>/_lod_auto)")
     ap.add_argument("--lod1-ratio", type=float, default=0.35, help="LOD1 triangle ratio (< 0.5)")
     ap.add_argument("--lod2-tris", type=int, default=500, help="LOD2 target triangle count")
+    ap.add_argument("--max-tris", type=int, default=95000,
+                    help="hard cap for the main mesh (default 95000, the kit's warning limit)")
+    ap.add_argument("--max-lod1-tris", type=int, default=0,
+                    help="hard cap for LOD1 (default: half of --max-tris)")
     ap.add_argument("--blender", default="", help="Blender executable")
     ap.add_argument("--check", action="store_true", help="run lod_check --quick on the candidate")
     ap.add_argument("--check-full", action="store_true", help="run the full 64-view lod_check")
@@ -175,6 +209,11 @@ def main():
         raise SystemExit("--lod1-ratio must be between 0.01 and 0.5")
     if a.lod2_tris < 50:
         raise SystemExit("--lod2-tris must be at least 50")
+    if a.max_tris < 100:
+        raise SystemExit("--max-tris must be at least 100")
+    max_lod1_tris = a.max_lod1_tris or max(1, a.max_tris // 2)
+    if max_lod1_tris >= a.max_tris:
+        raise SystemExit("--max-lod1-tris must be below --max-tris")
     src = resolve_asset(a.asset)
     name = os.path.splitext(os.path.basename(src))[0]
     cand = name + "_lod_auto"
@@ -206,14 +245,24 @@ def main():
     result = json.loads(marker[-1][len("LOD_AUTO_DONE "):])
     result.update({"status": "OK", "source": display_path(src),
                    "candidate": display_path(out_blend),
-                   "blender": blender, "cap_bottom": not a.no_cap_bottom})
+                   "blender": blender, "cap_bottom": not a.no_cap_bottom,
+                   "limits": {"max_tris": a.max_tris, "max_lod1_tris": max_lod1_tris}})
+    hard, warnings = [], []
+    if result["main_tris"] > a.max_tris:
+        hard.append("main is %d tris, above --max-tris %d" % (result["main_tris"], a.max_tris))
+    if result["lod1_tris"] > max_lod1_tris:
+        hard.append("LOD1 is %d tris, above --max-lod1-tris %d"
+                    % (result["lod1_tris"], max_lod1_tris))
+    uv = result.get("uv") or {}
+    for part in ("lod1", "lod2"):
+        stat = uv.get(part) or {}
+        if stat.get("outside_source"):
+            hard.append("%s has %d UV(s) outside the source atlas range"
+                        % (part.upper(), stat["outside_source"]))
     if result["lod1_tris"] >= result["main_tris"] * 0.5:
-        result["status"] = "WARN"
-        result["warning"] = "LOD1 is not below 50% of main"
+        warnings.append("LOD1 is not below 50% of main")
     if result["lod2_tris"] > 500:
-        result["status"] = "WARN"
-        result.setdefault("warning", "")
-        result["warning"] = (result["warning"] + "; " if result["warning"] else "") + "LOD2 is above 500 tris"
+        warnings.append("LOD2 is above 500 tris")
 
     if a.check or a.check_full:
         check = [sys.executable, os.path.join(HERE, "qa", "lod_check.py"), out_blend]
@@ -223,19 +272,30 @@ def main():
         lines = [line for line in (r.stdout or "").splitlines() if "LODCHECK" in line]
         result["check"] = {"line": lines[-1] if lines else None, "returncode": r.returncode}
         if a.check_full and "LODCHECK PASS" not in (lines[-1] if lines else ""):
-            result["status"] = "WARN"
+            warnings.append("full lod_check did not pass")
         if a.check and not a.check_full and "ok" not in (lines[-1] if lines else "").lower():
-            result["status"] = "WARN"
+            warnings.append("quick lod_check did not pass")
+
+    result["warnings"] = warnings
+    if hard:
+        result["status"] = "FAIL"
+        result["errors"] = hard
+    elif warnings:
+        result["status"] = "WARN"
+        result["warning"] = "; ".join(warnings)
 
     if a.json:
         print(json.dumps(result, ensure_ascii=False))
     else:
         print(f"[lod_auto] {result['candidate']}")
-        print(f"  main {result['main_tris']}  LOD1 {result['lod1_tris']}  LOD2 {result['lod2_tris']}")
+        print(f"  main {result['main_tris']}/{a.max_tris}  LOD1 {result['lod1_tris']}/{max_lod1_tris}"
+              f"  LOD2 {result['lod2_tris']}")
         if result.get("check"):
             print(f"  check: {result['check']['line']}")
-        if result.get("warning"):
-            print(f"  WARN {result['warning']}")
+        for e in hard:
+            print(f"  FAIL {e}")
+        for w in warnings:
+            print(f"  WARN {w}")
     return 0 if result["status"] == "OK" else 1
 
 

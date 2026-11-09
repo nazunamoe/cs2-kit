@@ -32,7 +32,26 @@ except Exception:
 EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
 
 
-def normalize(arr, block=64, max_gain=1.8, bright_pct=92.0):
+def patch_whites(lum, patch_frac=0.18):
+    """98th luminance percentile of five patches: four corners and the centre.
+
+    A single whole-image percentile is pulled down by a large shadowed area or by a
+    bright sky/window; the median of the patches is closer to the lit wall itself.
+    """
+    h, w = lum.shape
+    ps = max(8, int(round(min(h, w) * patch_frac)))
+    spots = [(0, 0), (w - ps, 0), (0, h - ps), (w - ps, h - ps),
+             ((w - ps) // 2, (h - ps) // 2)]
+    vals = []
+    for x, y in spots:
+        blk = lum[max(0, y):y + ps, max(0, x):x + ps]
+        if blk.size >= 16:
+            vals.append(round(float(np.percentile(blk, 98)), 1))
+    return vals
+
+
+def normalize(arr, block=64, max_gain=1.8, bright_pct=92.0,
+              patch_median=False, patch_frac=0.18):
     """Return the normalized image and a stats dict."""
     a = arr.astype(np.float32)
     lum = 0.299 * a[..., 0] + 0.587 * a[..., 1] + 0.114 * a[..., 2]
@@ -40,6 +59,13 @@ def normalize(arr, block=64, max_gain=1.8, bright_pct=92.0):
     white = float(np.percentile(lum, 98))
     stats = {"white": round(white, 1), "mean": round(float(lum.mean()), 1),
              "gain_min": 1.0, "gain_max": 1.0, "skipped": None}
+    if patch_median:
+        vals = patch_whites(lum, patch_frac)
+        stats["white_patches"] = vals
+        stats["white_mode"] = "patch-median" if vals else "global"
+        if vals:
+            white = float(np.median(vals))
+            stats["white"] = round(white, 1)
     if white < 45:
         stats["skipped"] = "no bright reference (image too dark)"
         return arr, stats
@@ -76,6 +102,10 @@ def main():
     ap.add_argument("--block", type=int, default=64, help="block size in px for the gain map")
     ap.add_argument("--max-gain", type=float, default=1.8)
     ap.add_argument("--bright-pct", type=float, default=92.0)
+    ap.add_argument("--patch-median", action="store_true",
+                    help="use the median of five patch whites (corners + centre) as the white reference")
+    ap.add_argument("--patch-frac", type=float, default=0.18,
+                    help="patch size as a fraction of the shorter side (default 0.18)")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
 
@@ -94,7 +124,8 @@ def main():
         if not os.path.isfile(path):
             raise SystemExit(f"no such image: {path}")
         im = Image.open(path).convert("RGB")
-        out_img, stats = normalize(np.asarray(im), a.block, max_gain=a.max_gain, bright_pct=a.bright_pct)
+        out_img, stats = normalize(np.asarray(im), a.block, max_gain=a.max_gain, bright_pct=a.bright_pct,
+                                   patch_median=a.patch_median, patch_frac=a.patch_frac)
         if a.out and len(files) == 1 and not a.dir:
             dest = a.out
         else:
@@ -133,7 +164,8 @@ def refs_mode(a):
             entry["file"] = cache[path]
             continue
         im = Image.open(path).convert("RGB")
-        out_img, stats = normalize(np.asarray(im), a.block, max_gain=a.max_gain, bright_pct=a.bright_pct)
+        out_img, stats = normalize(np.asarray(im), a.block, max_gain=a.max_gain, bright_pct=a.bright_pct,
+                                   patch_median=a.patch_median, patch_frac=a.patch_frac)
         folder = os.path.dirname(path)
         stem, _ = os.path.splitext(os.path.basename(path))
         dest = os.path.join(folder, f"{stem}{a.suffix}.png")
@@ -151,6 +183,7 @@ def refs_mode(a):
                       "shadowed areas lifted to the lit wall colour, for colour measurement only").strip(" |")
     refs["_shadow_norm"] = {"source_refs": a.refs, "block": a.block, "max_gain": a.max_gain,
                             "bright_pct": a.bright_pct, "suffix": a.suffix,
+                            "patch_median": bool(a.patch_median), "patch_frac": a.patch_frac,
                             "note": "use for albedo/paint measurement, not as a display photo"}
     with open(out_refs, "w", encoding="utf-8") as f:
         json.dump(refs, f, ensure_ascii=False, indent=1)
