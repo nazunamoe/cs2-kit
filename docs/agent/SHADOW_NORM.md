@@ -7,6 +7,25 @@ python tools/shadow_norm.py --image photos/wall.png --out photos/wall_lit.png --
 python tools/shadow_norm.py --dir photos/planes --out photos/planes_lit --block 64 --json
 ```
 
+## Normalizing a whole photo_refs file
+
+`--refs` normalizes every image a `photo_refs.json` points at and writes a **new refs json**
+with the updated file paths. Paint tools then run on the normalized refs, so the colour
+sampling and the wall texture both use the corrected images.
+
+```bash
+python tools/shadow_norm.py --project my-building \
+  --refs photo_refs.json --out-refs photo_refs_lit.json
+```
+
+- the same image referenced by several entries is normalized once
+- the new refs file keeps every other field (`corners`, `size_m`, `paint_exclude`, ...) and
+  records the settings under `_shadow_norm`
+- `photo_refs_lit.json` is the file to hand to `band_scan.py` / `facade_read.py` when the
+  measurement is about colour; keep the original refs for geometry
+- the normalized images are written next to the originals (`<name>_lit.png`), the source
+  photos are never modified
+
 ## Method
 
 1. The 98th luminance percentile is the white-wall reference.

@@ -65,6 +65,18 @@ python tools/band_scan.py --refs photo_refs.json --name 101_p1_1 --fh 2.9 --out 
 
 `paint_include`와 `paint_exclude`로 나무·간판·그림자 등을 정규화된 벽 U/V 좌표로 제외할 수 있습니다. 창은 자동 마스크에서 제외하고, 미확정 셀은 임의 색으로 채우지 않고 `cell_id=-1`로 남겨 기본 벽 재질을 유지합니다. `_mask.png`와 refs 디버그 이미지를 반드시 확인하세요. 캡처 재개, camera 필드, 성능 선택지는 [네이버 VR 캡처와 도색 refs](docs/agent/NAVER_VR.md)에 정리했습니다.
 
+색을 뽑을 때는 그늘을 먼저 보정합니다. 그늘진 벽도 같은 재질이므로 밝은 흰 벽을 기준으로
+블록별 배율을 만들어야 팔레트가 어두워지지 않습니다.
+
+```bash
+python tools/shadow_norm.py --project my-building \
+  --refs photo_refs.json --out-refs photo_refs_lit.json
+```
+
+`--refs`는 refs가 가리키는 모든 사진을 한꺼번에 보정하고 **경로가 갱신된 새 refs 파일**을
+만듭니다(원본 사진은 그대로). 도색·색 측정에는 이 파일을, 형상에는 원본 refs를 씁니다.
+자세한 내용은 [그림자 정규화](docs/agent/SHADOW_NORM.md)를 참고하세요.
+
 ### 사진 평면을 모델 벽에 붙이기
 
 캡처 사진은 자기 평면(장면 미터)을, 모델은 자기 벽(모델 미터)을 알고 있어서 둘을 맞춰야 창 열을 놓을 수 있습니다.
