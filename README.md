@@ -226,10 +226,13 @@ Windows에서는 PowerShell 7과 UTF-8을 권장합니다. 네이티브 편집�
 
 - [OpenCode 문서](https://opencode.ai/docs/)
 - [설치와 업그레이드](INSTALL.md)
+- [문서 지도](docs/README.md)
 - [DeepSeek/Codex 연결 기록](docs/agent/DEEPSEEK.md) — 과거 실행기 참고용
 - [전체 작업 절차](docs/agent/WORKFLOW.md)
 - [도구와 API](TOOLS.md)
 - [상세 모델링 지침](docs/agent/MODELING.md)
+- [측정 기반 파사드](docs/agent/FACADE_MEASURED.md)
+- [입면 작업 노하우](docs/agent/FACADE_KNOWHOW.md)
 - [GLB 기반 매스 재구성](docs/agent/GLB_MASS.md)
 - [GLB 없는 사진 증거 작업](docs/agent/PHOTO_ONLY.md)
 - [상가·학교·비정형 볼륨](docs/agent/VOLUMES.md)
