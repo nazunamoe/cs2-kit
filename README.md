@@ -89,6 +89,17 @@ python tools/xrx_mass.py --project my-apt --xrx photos/data.xrx.json --dongs 101
 
 `paint_include`와 `paint_exclude`로 나무·간판·그림자 등을 정규화된 벽 U/V 좌표로 제외할 수 있습니다. 창은 자동 마스크에서 제외하고, 미확정 셀은 임의 색으로 채우지 않고 `cell_id=-1`로 남겨 기본 벽 재질을 유지합니다. `_mask.png`와 refs 디버그 이미지를 반드시 확인하세요. 캡처 재개, camera 필드, 성능 선택지는 [네이버 VR 캡처와 도색 refs](docs/agent/NAVER_VR.md)에 정리했습니다.
 
+### 사진 평면을 모델 벽에 붙이기
+
+캡처 사진은 자기 평면(장면 미터)을, 모델은 자기 벽(모델 미터)을 알고 있어서 둘을 맞춰야 창 열을 놓을 수 있습니다.
+
+```bash
+python tools/photo_plane_map.py --project my-building \
+  --meta photos/<dong>_meta.json --mass generic_spec.json --refs photo_refs.json
+```
+
+사진 평면마다 **덮는 모델 벽·미터 오프셋·좌우 반전 여부·실제 해상도(px/m)**를 알려줍니다. 해상도가 낮으면(창 폭 측정에 20 px/m 미만) 그 사진으로는 창 폭을 읽을 수 없으니 다시 캡쳐해야 합니다. 자세한 내용은 [사진 평면 → 모델 벽 매핑](docs/agent/PHOTO_PLANE_MAP.md)을 참고하세요.
+
 ### GLB 없이 사진으로 작업
 
 `tools/evidence.py`는 사진과 관찰값을 벽에 연결합니다. 사진의 촬영 방향, 가림, 사용 가능한 측정 항목, 출처 해시, 신뢰도를 기록하고, 창은 전체 이미지 픽셀 대신 벽 기준 U/V 좌표로 저장합니다.
