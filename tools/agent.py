@@ -173,6 +173,10 @@ def builder_brief(gate, status):
     if not gate or status == "PASS":
         return None
     info = classify_gate(gate)
+    # Common file detection to guide Codex to edit shared logic
+    common_file = next((f for f in os.listdir(ROOT) if "_common.py" in f), None)
+    if common_file:
+        info["brief"] += f"\n- Note: Project contains shared logic in `{common_file}`. Check if the fix should be applied there."
     path = os.path.join(ROOT, "work", "logs", "builder_brief.md")
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
