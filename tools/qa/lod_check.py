@@ -3,6 +3,7 @@
 
 검증 도구(tools/qa/). cycle.py 다음에, 보고 전에 매번 돌린다.
 Blender 앱이 있으면 앱으로(빠름), 없으면 bpy 모듈로 돈다(`LOD_ENGINE=exe|py` 로 고정).
+올려다봄 각도(ring)마다 Blender 를 따로 띄워 동시에 그린다(최대 4개, 결과는 한 번에 돌린 것과 같다). `LOD_JOBS=1` 이면 한 프로세스로.
   python tools/qa/lod_check.py output/<asset>                # 활성 프로젝트 기준 경로
   python tools/qa/lod_check.py output/<asset> --az 16 --elev -10,5,25,50 --res 512
   python tools/qa/lod_check.py --self-test                  # closed cube PASS + open-front cube FAIL baseline
@@ -93,6 +94,13 @@ def run_bl(py_file, args, blend=None):
 
 
 def active_project():
+    # cycle.py / agent.py run with an explicit --project and pass it down as CS2_PROJECT (tools/proj.py).
+    # That project wins over projects/.current, otherwise the previews land in another project's folder.
+    env = (os.environ.get("CS2_PROJECT") or "").strip()
+    if env:
+        for cand in (env, os.path.join(KIT, "projects", env)):
+            if os.path.isdir(cand):
+                return os.path.abspath(cand)
     try:
         out = subprocess.run([sys.executable, os.path.join(KIT, "tools", "project.py"), "where"],
                              capture_output=True, text=True, cwd=KIT).stdout.strip().splitlines()
@@ -146,6 +154,58 @@ for name, missing in (("BaselineClosed", False), ("BaselineOpen", True)):
     sys.exit(0 if passed else 1)
 
 
+def lod_jobs(n_elev):
+    """How many Blender processes share the views. LOD_JOBS=1 keeps the single-process run."""
+    try:
+        want = int(os.environ.get("LOD_JOBS", "0"))
+    except ValueError:
+        want = 0
+    if want <= 0:
+        want = min(4, max(1, (os.cpu_count() or 2) // 2))
+    return max(1, min(want, n_elev))
+
+
+def run_parallel(bl, path, out, a):
+    """Render the elevation rings in separate Blender processes and merge their rows in the original order.
+    The views are independent (one camera pose each), so the result equals the single-process run; only the
+    wall time changes (~0.03 s per mask render x 384 renders otherwise run back to back).
+    Returns False when it did not run or any part failed - the caller then does the plain single run."""
+    elevs = [e.strip() for e in a.elev.split(",") if e.strip()]
+    n = lod_jobs(len(elevs))
+    if n < 2:
+        return False
+    chunks = [c for c in (elevs[i::n] for i in range(n)) if c]
+    from concurrent.futures import ThreadPoolExecutor
+    parts = [f"_part{i}" for i in range(len(chunks))]
+    try:
+        with ThreadPoolExecutor(max_workers=len(chunks)) as ex:
+            res = list(ex.map(lambda cp: run_bl(bl, [path, out, str(a.res), str(a.az), ",".join(cp[0]), cp[1]], blend=path),
+                              zip(chunks, parts)))
+        rows, asset = [], None
+        for r, part in zip(res, parts):
+            if "LODCHECK_DONE" not in (r.stdout or ""):
+                return False
+            with open(os.path.join(out, f"lod_check{part}.json"), encoding="utf-8") as f:
+                data = json.load(f)
+            asset = data.get("asset", asset)
+            rows += data["rows"]
+        order = {float(e): i for i, e in enumerate(elevs)}          # elevation ring first, as the single run emits
+        rows.sort(key=lambda x: order.get(float(x["el"]), len(order)))   # stable: az / lod order inside a ring is kept
+        with open(os.path.join(out, "lod_check.json"), "w") as f:
+            json.dump(dict(asset=asset, rows=rows), f, indent=1)
+        return True
+    except Exception as exc:                               # noqa: BLE001 - any trouble: fall back to the single run
+        print(f"[lod_check] parallel run failed ({type(exc).__name__}: {exc}); single run")
+        return False
+    finally:
+        for part in parts:
+            for name in (f"lod_check{part}.json", f"_tmp{part}.png"):
+                try:
+                    os.remove(os.path.join(out, name))
+                except OSError:
+                    pass
+
+
 def print_where(p, shift):
     """One hole spot: the BACK face seen through the hole (gen = exported xyz - pivot_shift), then the nearest front faces around the
     hole = candidates for the missing wall. gap = screen distance (m) from the hole to that face's outline; two faces with a tiny gap
@@ -191,13 +251,14 @@ def main():
     eng = lod_engine()
     if eng:
         print(f"[lod_check] engine: {'Blender app' if eng[0] == 'exe' else 'bpy module'}  {eng[1]}")
-    for _ in range(2):                                 # once more on a one-off failure (file still being written)
-        r = run_bl(bl, [path, out, str(a.res), str(a.az), a.elev], blend=path)
-        if "LODCHECK_DONE" in r.stdout:
-            break
-    if "LODCHECK_DONE" not in r.stdout:
-        print(r.stdout[-2000:], r.stderr[-2000:])
-        sys.exit("[lod_check] Blender/bpy run failed")
+    if not run_parallel(bl, path, out, a):
+        for _ in range(2):                             # once more on a one-off failure (file still being written)
+            r = run_bl(bl, [path, out, str(a.res), str(a.az), a.elev], blend=path)
+            if "LODCHECK_DONE" in r.stdout:
+                break
+        if "LODCHECK_DONE" not in r.stdout:
+            print(r.stdout[-2000:], r.stderr[-2000:])
+            sys.exit("[lod_check] Blender/bpy run failed")
     rows = json.load(open(os.path.join(out, "lod_check.json"), encoding="utf-8"))["rows"]
     man = os.path.join(os.path.dirname(path), "manifest.json")
     shift = (0.0, 0.0)

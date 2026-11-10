@@ -1,7 +1,7 @@
 # Blender 안에서 도는 부분 (lod_check.py 가 부른다). Blender 앱과 bpy 모듈 둘 다에서 동작한다.
 # 게임처럼 뒷면을 그리지 않고(backface culling) 메인 / LOD1 / LOD2 의 실루엣을 여러 각도에서 그려,
 # 메인은 막혀 있는데 LOD 는 뒤가 보이는 픽셀(= 게임에서 "투명해 보이는" 곳)을 센다.
-# 사용: blender -b <asset.blend> -P lod_check_bl.py -- <asset.blend> <out_dir> <res> <n_az> <elevs,>
+# 사용: blender -b <asset.blend> -P lod_check_bl.py -- <asset.blend> <out_dir> <res> <n_az> <elevs,> [조각 이름]
 #       python lod_check_bl.py -- <asset.blend> <out_dir> <res> <n_az> <elevs,>      (bpy 모듈)
 import bpy, sys, math, os, json
 from mathutils import Vector
@@ -10,6 +10,7 @@ import numpy as np
 a = sys.argv[sys.argv.index("--") + 1:]
 blend, out_dir, res, n_az = a[0], a[1], int(a[2]), int(a[3])
 elevs = [float(e) for e in a[4].split(",")]
+part = a[5] if len(a) > 5 else ""       # lod_check.py 가 시점을 여러 Blender 로 나눌 때의 조각 이름 (임시·결과 파일 구분)
 if blend and os.path.abspath(blend) != os.path.abspath(bpy.data.filepath or ""):
     bpy.ops.wm.open_mainfile(filepath=os.path.abspath(blend))   # bpy 모듈: -b 로 열지 않으므로 직접 연다
 os.makedirs(out_dir, exist_ok=True)
@@ -174,7 +175,7 @@ def locate(objs, hole, d, n=4):
 
 
 rows = []
-tmp = os.path.join(out_dir, "_tmp.png")
+tmp = os.path.join(out_dir, f"_tmp{part}.png")
 for el in elevs:
     gvis = el < 0                                        # 내려다보는 시점에는 바닥이 화면만 채운다
     for k in range(n_az):
@@ -214,5 +215,5 @@ for el in elevs:
                 bpy.data.images.remove(im)
 if os.path.exists(tmp):
     os.remove(tmp)
-json.dump(dict(asset=base, rows=rows), open(os.path.join(out_dir, "lod_check.json"), "w"), indent=1)
+json.dump(dict(asset=base, rows=rows), open(os.path.join(out_dir, f"lod_check{part}.json"), "w"), indent=1)
 print("LODCHECK_DONE", base)

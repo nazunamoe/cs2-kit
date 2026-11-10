@@ -1218,21 +1218,50 @@ def _bleed_index(filled, n):
     return iy, ix
 
 
+def _code_source(co):
+    """코드 객체의 소스 줄 (첫 줄 ~ 마지막 명령이 끝나는 줄). 파일이나 위치 정보가 없으면 None.
+    바이트코드(co_code)는 파이썬 버전마다 달라서, 일반 python(OBJ)과 Blender 내장 python(FBX)이
+    같은 painter 에 서로 다른 키를 만들어 실행할 때마다 아틀라스를 다시 그렸다. 소스 줄은 어디서나 같다."""
+    import linecache
+    import types
+    try:
+        last = co.co_firstlineno
+        stack = [co]
+        while stack:
+            c = stack.pop()
+            for pos in c.co_positions():
+                end = pos[1] if pos[1] is not None else pos[0]
+                if end is not None and end > last:
+                    last = end
+            stack += [k for k in c.co_consts if isinstance(k, types.CodeType)]
+        lines = linecache.getlines(co.co_filename)
+        if not lines or last > len(lines):
+            return None
+        return "".join(lines[co.co_firstlineno - 1:last])
+    except Exception:                                     # noqa: BLE001 - 위치 정보가 없는 구버전 등
+        return None
+
+
 def _fn_sig(fn, _depth=0):
-    """함수의 바이트코드·상수·기본값·클로저 값·참조하는 전역 값으로 만든 문자열. 알 수 없으면 None."""
+    """함수의 소스(없으면 바이트코드)·기본값·클로저 값·참조하는 전역 값으로 만든 문자열. 알 수 없으면 None."""
     import types
     if _depth > 4:
         return None
     parts = []
 
     def code_sig(co):
+        src = _code_source(co)
+        if src is not None:
+            return "src:" + src + "|" + repr(co.co_names)
         out = [co.co_code.hex(), repr(co.co_names), repr(co.co_varnames)]
         for k in co.co_consts:
             out.append(code_sig(k) if isinstance(k, types.CodeType) else repr(k))
         return "|".join(out)
 
     def val(v):
-        if isinstance(v, (int, float, str, bool, bytes, type(None), tuple, list, dict, set)):
+        if isinstance(v, (set, frozenset)):
+            r = repr(sorted(v, key=repr))                # 집합 순서는 실행마다 다를 수 있다 (문자열 해시)
+        elif isinstance(v, (int, float, str, bool, bytes, type(None), tuple, list, dict)):
             r = repr(v)
         elif isinstance(v, np.ndarray):
             r = v.tobytes().hex()[:4096] + str(v.shape)
@@ -1241,7 +1270,7 @@ def _fn_sig(fn, _depth=0):
         elif isinstance(v, types.ModuleType) or isinstance(v, type):
             r = getattr(v, "__name__", "?")
         elif isinstance(v, np.generic):
-            r = repr(v)
+            r = repr(v.item())                           # numpy 버전에 따라 repr 모양이 다르다
         else:
             r = repr(v)
         return None if (r is None or " at 0x" in r) else r
@@ -1523,20 +1552,54 @@ class WindowSet:
 def write_obj(path, mb):
     """OBJ (Y-up: x, z, -y). 면마다 꼭짓점 UV.
     같은 내용을 <path>.npz 로도 남긴다 - check/render/backface_check 가 OBJ 텍스트를 다시 파싱하지 않는다."""
-    with open(path, "w") as f:
-        for x, y, z in mb.verts:
-            f.write("v %.5f %.5f %.5f\n" % (x, z, -y))
-        for uv4 in mb.uvs:
-            for u, v in uv4:
-                f.write("vt %.6f %.6f\n" % (u, v))
-        offset = 0
-        for face in mb.faces:
-            f.write("f " + " ".join("%d/%d" % (vi + 1, offset + k + 1) for k, vi in enumerate(face)) + "\n")
-            offset += len(face)
+    text = _obj_text(mb)
+    # 내용이 지난번과 같으면 파일을 건드리지 않는다. mtime 이 그대로라 npz 사이드카와 render.py 의
+    # 미리보기 캐시가 계속 유효하고, 같은 폴더를 읽고 있는 검사 도구와도 부딪히지 않는다.
+    try:
+        with open(path) as f:
+            same = f.read() == text
+    except (OSError, UnicodeDecodeError):
+        same = False
+    if same and _obj_cache_valid(path):
+        return
+    if not same:
+        with open(path, "w") as f:
+            f.write(text)
     _write_obj_cache(path, mb)
 
 
+def _obj_text(mb):
+    """OBJ 본문. 줄마다 포맷하지 않고 종류별로 한 번에 포맷한다 (줄 단위와 같은 글자)."""
+    from itertools import chain
+    nv = len(mb.verts)
+    out = [("v %.5f %.5f %.5f\n" * nv) % tuple([c for x, y, z in mb.verts for c in (x, z, -y)])]
+    flat = list(chain.from_iterable(chain.from_iterable(mb.uvs)))
+    out.append(("vt %.6f %.6f\n" * (len(flat) // 2)) % tuple(flat))
+    nf = len(mb.faces)
+    if nf and all(len(f) == 4 for f in mb.faces):
+        idx = np.empty((nf, 4, 2), np.int64)
+        idx[:, :, 0] = np.asarray(mb.faces, np.int64) + 1
+        idx[:, :, 1] = np.arange(1, 4 * nf + 1).reshape(nf, 4)
+        out.append(("f %d/%d %d/%d %d/%d %d/%d\n" * nf) % tuple(idx.ravel().tolist()))
+    else:
+        offset = 0
+        for face in mb.faces:
+            out.append("f " + " ".join("%d/%d" % (vi + 1, offset + k + 1) for k, vi in enumerate(face)) + "\n")
+            offset += len(face)
+    return "".join(out)
+
+
 OBJ_CACHE_VERSION = 1
+
+
+def _obj_cache_valid(path):
+    """<path>.npz 가 지금의 OBJ(크기·mtime)를 가리키는지."""
+    try:
+        st = os.stat(path)
+        with np.load(path + ".npz", allow_pickle=False) as z:
+            return z["key"].item() == f"{OBJ_CACHE_VERSION}:{st.st_size}:{st.st_mtime_ns}"
+    except Exception:                                     # noqa: BLE001 - 없거나 깨졌으면 다시 쓴다
+        return False
 
 
 def _write_obj_cache(path, mb):
@@ -1646,9 +1709,17 @@ def export_asset(name_base, level, meshes, atlas, out_root, lod2_tex=1024, lot=N
                    tris={k: parts[k].tri_count for k in PARTS}, windows=len(win_main.faces), tex=atlas.size,
                    lod1_tex=atlas.size, lod2_tex=lod2_tex, warnings=warns, notes=notes or {},
                    dropped_windows=len(audit))
-    with open(os.path.join(folder, "manifest.json"), "w", encoding="utf-8") as f:
-        json.dump(dict(summary, atlas=atlas.to_json(), tags={k: sorted(set(parts[k].tags)) for k in PARTS},
-                       metadata=metadata or {}), f, ensure_ascii=False, indent=1)
+    man_text = json.dumps(dict(summary, atlas=atlas.to_json(), tags={k: sorted(set(parts[k].tags)) for k in PARTS},
+                               metadata=metadata or {}), ensure_ascii=False, indent=1)
+    man_path = os.path.join(folder, "manifest.json")
+    try:
+        with open(man_path, encoding="utf-8") as f:
+            man_same = f.read() == man_text
+    except (OSError, UnicodeDecodeError):
+        man_same = False
+    if not man_same:                                      # 같은 내용이면 다시 쓰지 않는다 (write_obj 와 같은 이유)
+        with open(man_path, "w", encoding="utf-8") as f:
+            f.write(man_text)
     chk = os.path.join(folder, "_check")                  # 검사·미리보기용 OBJ (게임에 넣지 않음)
     os.makedirs(chk, exist_ok=True)
     for k in PARTS:

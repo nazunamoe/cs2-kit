@@ -29,13 +29,34 @@ class Mesh:
     def tri_count(self):
         return sum(len(f) - 2 for f in self.faces)
 
+    def padded(self):
+        """(F,4) 인덱스 · (F,) 꼭짓점 수 · (F,4,2) UV. 삼각형은 마지막 점을 반복해 채운다.
+        한 번 만들어 재사용한다 (faces/uvs 는 바꾸지 않는다; verts 는 바뀌어도 된다)."""
+        if not hasattr(self, "_pad"):
+            n = len(self.faces)
+            L = np.fromiter((len(f) for f in self.faces), np.int64, n)
+            if n and L.min() == 4 and L.max() == 4:
+                F = np.array(self.faces, np.int64)
+            else:
+                F = np.array([(list(f) + [f[-1]] * 3)[:4] for f in self.faces], np.int64).reshape(-1, 4)
+            UV = None
+            if len(self.uvs) == n and all(len(u) == k for u, k in zip(self.uvs, L.tolist())):
+                if n and L.min() == 4 and L.max() == 4:
+                    UV = np.asarray(self.uvs, float).reshape(-1, 4, 2)
+                else:
+                    UV = np.zeros((n, 4, 2))
+                    for k in np.unique(L).tolist():
+                        rows = np.nonzero(L == k)[0]
+                        part = np.asarray([self.uvs[i] for i in rows.tolist()], float).reshape(len(rows), k, 2)
+                        UV[rows, :min(k, 4)] = part[:, :4]
+                        if k < 4:
+                            UV[rows, k:] = part[:, -1:]
+            self._pad = (F, L, UV)
+        return self._pad
+
     def quads(self):
         """(F,4,3) — 삼각형은 마지막 점을 반복해 사각형 모양으로."""
-        out = np.zeros((len(self.faces), 4, 3))
-        for i, f in enumerate(self.faces):
-            idx = list(f) + [f[-1]] * (4 - len(f)) if len(f) < 4 else list(f[:4])
-            out[i] = self.verts[idx]
-        return out
+        return np.asarray(self.verts, float)[self.padded()[0]]
 
 
 OBJ_CACHE_VERSION = 1

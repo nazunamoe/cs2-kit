@@ -19,6 +19,7 @@ import glob
 import hashlib
 import math
 import os
+import shutil
 import sys
 
 import numpy as np
@@ -93,6 +94,7 @@ def _collect_tris(parts, box):
 
 MAX_FRAG = 1 << 17          # 한 배치의 (삼각형 x 픽셀) 원소 수 상한
 _NO_BATCH = False           # 디버그: True 면 모든 삼각형을 기존 순차 경로로
+SHADE_CHUNK = 1 << 15       # 지연 셰이딩 한 번에 처리하는 픽셀 수 (메모리 상한)
 
 
 def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=False,
@@ -218,31 +220,76 @@ def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=Fa
             wpix = pixv[win]
             zb_flat[wpix] = depv[win]
             owner[wpix] = ids[fidx[win] // K]
-            if mask:
-                img_flat[wpix] = 1.0
-                continue
-            tri = ids[fidx[win] // K]
-            w0w, w1w, w2w = w0.ravel()[fidx[win]], w1.ravel()[fidx[win]], w2.ravel()[fidx[win]]
-            u = w0w * U0[tri] + w1w * U1[tri] + w2w * U2[tri]
-            v = w0w * V0[tri] + w1w * V1[tri] + w2w * V2[tri]
-            tpx = np.clip((u * tW).astype(np.int32), 0, tW - 1)
-            tpy = np.clip(((1 - v) * tH).astype(np.int32), 0, tH - 1)
-            flat = tpy * tW + tpx
-            bump = 1.0
-            if tnrm is not None:
-                nn = tnrm[flat] / 127.5 - 1
-                bump = 1 + 0.6 * (nn[:, 0] * 0.4 - nn[:, 1] * 0.5)
-            sh = (shade[tri] * bump / 255.0)[:, None]
-            col = sh * (timg[flat][:, :3] if timg is not None else 255.0)
-            if temis is not None:
-                col = col + temis[flat] * emis_k
-            img_flat[wpix] = col
 
-    # ---- 큰 불투명 삼각형과 유리는 기존 방식(적은 수)
-    tail = np.concatenate((big, glass)) if (len(big) + len(glass)) else ()
-    for i in tail:
+    # ---- 큰 불투명 삼각형: depth 와 소유 삼각형만 기록 (셰이딩은 아래에서 화면 픽셀당 한 번)
+    own2 = owner.reshape(H, W)
+    for i in big:
         i = int(i)
-        xa, ya, da = X[i], Y[i], dpt[i]
+        x0, x1 = int(bx0[i]), int(bx1[i])
+        y0, y1 = int(by0[i]), int(by1[i])
+        gx = np.arange(x0, x1 + 1) + 0.5
+        gy = np.arange(y0, y1 + 1) + 0.5
+        w0 = (e0[i] * (gx[None, :] - cx_[i]) + e1[i] * (gy[:, None] - cy_[i])) / den[i]
+        w1 = (e2[i] * (gx[None, :] - cx_[i]) + e3[i] * (gy[:, None] - cy_[i])) / den[i]
+        w2 = 1 - w0 - w1
+        m = (w0 >= -1e-6) & (w1 >= -1e-6) & (w2 >= -1e-6)
+        if not m.any():
+            continue
+        dep = w0 * da0[i]
+        dep += w1 * da1[i]
+        dep += w2 * da2[i]
+        sub = zb[y0:y1 + 1, x0:x1 + 1]
+        m &= dep < sub
+        if talpha is not None and not mask:        # 알파 컷: 후보 픽셀에서만 텍스처를 본다
+            ys, xs = np.nonzero(m)
+            if not len(ys):
+                continue
+            a0, a1, a2 = w0[ys, xs], w1[ys, xs], w2[ys, xs]
+            u = a0 * U0[i] + a1 * U1[i] + a2 * U2[i]
+            v = a0 * V0[i] + a1 * V1[i] + a2 * V2[i]
+            tpx = np.clip((u * tW).astype(np.int64), 0, tW - 1)
+            tpy = np.clip(((1 - v) * tH).astype(np.int64), 0, tH - 1)
+            keep = talpha[tpy * tW + tpx] >= 128
+            ys, xs = ys[keep], xs[keep]
+            sub[ys, xs] = dep[ys, xs]
+            own2[y0:y1 + 1, x0:x1 + 1][ys, xs] = i
+            continue
+        sub[m] = dep[m]
+        own2[y0:y1 + 1, x0:x1 + 1][m] = i
+
+    # ---- 지연 셰이딩: 보이는 픽셀마다 소유 삼각형으로 무게중심 → UV → 텍스처를 한 번만 계산한다.
+    # (가려질 면을 칠하지 않는다. 식과 연산 순서는 삼각형별 계산과 같아 결과가 비트 단위로 같다)
+    seen = np.nonzero(owner != 0x7FFFFFFF)[0]
+    if mask:
+        img_flat[seen] = 1.0
+        seen = seen[:0]
+    for c0 in range(0, len(seen), SHADE_CHUNK):
+        pix = seen[c0:c0 + SHADE_CHUNK]
+        tri = owner[pix]
+        ex = pix % W + 0.5 - cx_[tri]
+        ey = pix // W + 0.5 - cy_[tri]
+        dv = den[tri]
+        w0 = ((e0[tri] * ex) + (e1[tri] * ey)) / dv
+        w1 = ((e2[tri] * ex) + (e3[tri] * ey)) / dv
+        w2 = 1 - w0 - w1
+        u = w0 * U0[tri] + w1 * U1[tri] + w2 * U2[tri]
+        v = w0 * V0[tri] + w1 * V1[tri] + w2 * V2[tri]
+        tpx = np.clip((u * tW).astype(np.int64), 0, tW - 1)
+        tpy = np.clip(((1 - v) * tH).astype(np.int64), 0, tH - 1)
+        flat = tpy * tW + tpx
+        bump = 1.0
+        if tnrm is not None:
+            nn = tnrm[flat] / 127.5 - 1
+            bump = 1 + 0.6 * (nn[:, 0] * 0.4 - nn[:, 1] * 0.5)
+        sh = (shade[tri] * bump / 255.0)[:, None]
+        col = sh * (timg[flat][:, :3] if timg is not None else 255.0)
+        if temis is not None:
+            col = col + temis[flat] * emis_k
+        img_flat[pix] = col
+
+    # ---- 유리: 불투명 셰이딩이 끝난 뒤 순서대로 섞는다 (mask 모드에서는 불투명처럼 덮는다)
+    for i in glass:
+        i = int(i)
         x0, x1 = int(bx0[i]), int(bx1[i])
         y0, y1 = int(by0[i]), int(by1[i])
         gx = np.arange(x0, x1 + 1) + 0.5
@@ -256,30 +303,12 @@ def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=Fa
         dep = w0 * da0[i] + w1 * da1[i] + w2 * da2[i]
         sub = zb[y0:y1 + 1, x0:x1 + 1]
         reg = img[y0:y1 + 1, x0:x1 + 1]
+        upd = m & (dep < sub)
         if mask:
-            upd = m & (dep < sub)
             sub[upd] = dep[upd]
             reg[upd] = 1.0
             continue
-        if is_glass[i]:
-            upd = m & (dep < sub)
-            reg[upd] = reg[upd] * 0.62 + GLS * 0.38 * (0.3 if night else 1)
-            continue
-        u = w0 * U0[i] + w1 * U1[i] + w2 * U2[i]
-        v = w0 * V0[i] + w1 * V1[i] + w2 * V2[i]
-        px = np.clip((u * tW).astype(int), 0, tW - 1); py = np.clip(((1 - v) * tH).astype(int), 0, tH - 1)
-        bump = 1.0
-        if tnrm is not None:
-            nn = tex.nrm[py, px] / 127.5 - 1
-            bump = 1 + 0.6 * (nn[..., 0] * 0.4 - nn[..., 1] * 0.5)
-        col = (tex.img[py, px][..., :3] if tex is not None else 255.0) * (shade[i] * bump / 255.0)[..., None]
-        if temis is not None:
-            col = col + tex.emis[py, px] * emis_k
-        if talpha is not None:
-            m = m & (tex.alpha[py, px] >= 128)
-        upd = m & (dep < sub)
-        sub[upd] = dep[upd]
-        reg[upd] = col[upd]
+        reg[upd] = reg[upd] * 0.62 + GLS * 0.38 * (0.3 if night else 1)
     im = Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8))
     if label and title:
         ImageDraw.Draw(im).text((10, 8), title, fill=(30, 30, 30) if not night else (230, 230, 230))
@@ -376,12 +405,13 @@ def main():
             cache_file = os.path.join(cache_dir, render_cache_key(a) + ".png")
             if os.path.isfile(cache_file):
                 os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
-                Image.open(cache_file).save(a.out)
+                shutil.copyfile(cache_file, a.out)          # 같은 PNG: 디코드·재압축 없이 복사
                 print(f"[render] cached {a.out}")
                 return
         except Exception:
             cache_file = None
     asset, M, texdir, man = load_asset(a.path)
+    _CTX[a.path] = dict(asset=asset, M=M, texdir=texdir, man=man, tex={})    # 뷰 작업이 다시 읽지 않게
     size = tuple(int(s) for s in a.size.lower().split("x"))
     zoom = tuple(float(s) for s in a.zoom.split(",")) if a.zoom else None
     box = tuple(float(s) for s in a.box.split(",")) if a.box else None
@@ -404,10 +434,14 @@ def main():
     common = (a.path, size, zoom, box, a.night, not a.nolabel, a.mode)
     ims = None
     n_real = sum(1 for j in jobs if j[1] is not None)
-    if n_real >= 2 and os.environ.get("RENDER_SERIAL") != "1":       # 뷰마다 프로세스를 나눠 병렬 (순수 파이썬 래스터라이저)
+    if n_real >= 2 and os.environ.get("RENDER_SERIAL") != "1":
+        # 뷰마다 스레드로 병렬. 래스터라이저는 큰 numpy 연산이 대부분이라 GIL 을 놓는 시간이 길고,
+        # 프로세스 풀과 달리 에셋·4096² 텍스처를 한 번만 읽는다 (프로세스 기동 + 재로드가 렌더보다 길었다).
         try:
-            from concurrent.futures import ProcessPoolExecutor
-            with ProcessPoolExecutor(max_workers=min(n_real, os.cpu_count() or 2)) as ex:
+            from concurrent.futures import ThreadPoolExecutor
+            for lod2 in {j[0] == "lod2" for j in jobs if j[1] is not None}:      # 텍스처는 미리 한 번
+                _CTX[a.path]["tex"][lod2] = Tex(texdir, asset, lod2, a.mode)
+            with ThreadPoolExecutor(max_workers=min(n_real, os.cpu_count() or 2)) as ex:
                 ims = list(ex.map(_view_job, [(j, common) for j in jobs]))
         except Exception as e:  # noqa
             print(f"[render] parallel failed ({type(e).__name__}); serial")

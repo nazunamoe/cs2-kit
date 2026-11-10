@@ -7,6 +7,8 @@ Legacy --no-render/--tiles/--full options remain accepted.
 PASS applies only to checks that ran. NOT_CHECKED is not PASS; NOT_APPLICABLE means no photo refs exist.
 Strict exit codes: 0 PASS, 1 FAIL, 2 INCOMPLETE. Non-strict RESULT keeps the legacy geometry-only meaning.
 Use tools/agent.py for compact next_action JSON, resume state, and visual-review recording.
+After the OBJ build, the geometry check, preview, photo/tile checks and the FBX export (then the LOD check)
+run at the same time; the report is printed in the fixed build/check/preview/photo/LOD order.
 """
 import argparse
 import glob
@@ -62,6 +64,20 @@ def save_progress(img_path, asset, ok, n_err, label):
 
 
 CACHE_VERSION = 2
+
+
+def outputs_stamp(asset_dir):
+    """(name, size, mtime) of every file the checks read; changes when a later build pass rewrites one."""
+    files = (glob.glob(os.path.join(asset_dir, "*.png")) + glob.glob(os.path.join(asset_dir, "manifest.json")) +
+             glob.glob(os.path.join(asset_dir, "_check", "*.obj")))
+    out = []
+    for path in sorted(files):
+        try:
+            st = os.stat(path)
+            out.append((os.path.basename(path), st.st_size, st.st_mtime_ns))
+        except OSError:
+            out.append((os.path.basename(path), -1, -1))
+    return out
 
 
 def mesh_signature(asset_dir):
@@ -148,9 +164,85 @@ def main():
         if "[WARN]" in l or l.startswith("[cs2kit] tris"):
             print("   " + l)
 
-    # 2) 검사
-    rep = os.path.join(out, asset, "_check", "report.json")
-    code, log = run([py, os.path.join(HERE, "check.py"), os.path.join(out, asset), "--list", str(a.list), "--json", rep])
+    # 2~3) 검사·미리보기·사진 비교는 1단계 산출물(OBJ/PNG)만 읽는다. 서로 기다릴 이유가 없으므로
+    #      FBX 내보내기(→ LOD 검사)와 함께 동시에 돌리고, 출력만 예전 순서대로 낸다.
+    import concurrent.futures as cf
+    asset_dir = os.path.join(out, asset)
+    rep = os.path.join(asset_dir, "_check", "report.json")
+    refs_exist = os.path.exists(os.path.join(ROOT, "photo_refs.json"))
+    want_visual = not a.no_render and refs_exist
+    want_tiles = bool(a.tiles or a.full)
+    pool = cf.ThreadPoolExecutor(max_workers=6)
+
+    def start_checks():
+        jobs = dict(check=pool.submit(run, [py, os.path.join(HERE, "check.py"), asset_dir,
+                                            "--list", str(a.list), "--json", rep]))
+        if a.backface_check:
+            jobs["backface"] = pool.submit(run, [py, os.path.join(HERE, "backface_check.py"), asset_dir, "--res", "128"])
+        if not a.no_render:
+            jobs["render"] = pool.submit(run, [py, os.path.join(HERE, "render.py"), asset_dir, "-o",
+                                               os.path.join(ROOT, "previews", asset + ".png"),
+                                               "--views", a.views, "--size", a.size])
+        if want_visual:
+            jobs["visual"] = pool.submit(run, [py, os.path.join(HERE, "visual_check.py"), asset_dir]
+                                         + (["--tiles", "--top", "3"] if want_tiles else []))
+        return jobs
+
+    stamp = outputs_stamp(asset_dir)
+    jobs = start_checks()
+
+    # 1b) FBX/LOD cache: mesh-only signature; texture/paint edits reuse both
+    mesh_sig = mesh_signature(asset_dir)
+    cache_path = os.path.join(asset_dir, "_check", "final_cache.json")
+    cache = read_cache(cache_path)
+    cache_ok = bool(cache and cache.get("mesh_sig") == mesh_sig)
+    cached_lod = cache.get("lod") if cache_ok else None
+    fbx_lines = []
+    if mode == "final":
+        have_fbx = bool(glob.glob(os.path.join(asset_dir, "*.fbx"))) and \
+                   bool(glob.glob(os.path.join(asset_dir, "*.blend")))
+        if cache_ok and have_fbx:
+            fbx = True
+            fbx_lines.append("[1/3 build] FBX/.blend cached (mesh unchanged)")
+        else:
+            code2, log2 = run([py, os.path.join(HERE, "run_blender.py"),
+                               os.path.abspath(a.generator), "--", "--out", out])
+            lines2 = [l for l in log2.splitlines() if l.strip()]
+            fbx = any("FBX + .blend" in l for l in lines2) and \
+                  bool(glob.glob(os.path.join(asset_dir, "*.fbx"))) and \
+                  bool(glob.glob(os.path.join(asset_dir, "*.blend")))
+            build_warns += [l.strip() for l in lines2 if "[WARN]" in l]
+            if outputs_stamp(asset_dir) != stamp:
+                # The Blender pass normally leaves identical OBJ/PNG/manifest untouched (cs2kit skips
+                # unchanged files). If it did rewrite something, the checks may have read a file
+                # mid-write: run them again on the final files.
+                cf.wait(list(jobs.values()))
+                jobs = start_checks()
+            if not fbx:
+                fbx_lines.append("[1/3 build] FBX export FAILED")
+                fbx_lines += ["   " + l for l in lines2[-12:]]
+            else:
+                fbx_lines.append("[1/3 build] FBX/.blend written")
+                mesh_sig = mesh_signature(asset_dir)
+                cache_ok = bool(cache and cache.get("mesh_sig") == mesh_sig)
+                cached_lod = cache.get("lod") if cache_ok else None
+
+    lod = dict(checked=False, status="NOT_CHECKED", line=None, notes=[])
+    lod_future = None
+    lod_lines = []
+    if a.full:
+        if cached_lod and cached_lod.get("checked"):
+            lod = dict(cached_lod)
+            lod_lines.append(f"[lod] cached {lod.get('line') or lod.get('status')}")
+        else:
+            lscript = os.path.join(KIT, "tools", "qa", "lod_check.py")
+            if not os.path.exists(lscript):
+                lod["notes"].append("tools/qa/lod_check.py not found")
+                lod_lines.append("[lod] NOT_CHECKED - tools/qa/lod_check.py not found")
+            else:
+                lod_future = pool.submit(run, [py, lscript, asset_dir, "--res", "512"])
+
+    code, log = jobs["check"].result()
     try:
         r = json.load(open(rep, encoding="utf-8"))[0]
     except Exception:
@@ -169,8 +261,7 @@ def main():
 
     backface_status = "NOT_CHECKED"
     if a.backface_check:
-        code, log = run([py, os.path.join(HERE, "backface_check.py"),
-                         os.path.join(out, asset), "--res", "128"])
+        code, log = jobs["backface"].result()
         line = next((l.strip() for l in log.splitlines() if l.strip().startswith("BACKFACE ")), None)
         if line:
             backface_status = "PASS" if "BACKFACE PASS" in line else "FAIL"
@@ -180,54 +271,8 @@ def main():
             print("[backface] FAIL - no result line")
             for l in log.splitlines()[-6:]:
                 print("   " + l)
-
-    # 1b) FBX/LOD cache: mesh-only signature; texture/paint edits reuse both
-    asset_dir = os.path.join(out, asset)
-    mesh_sig = mesh_signature(asset_dir)
-    cache_path = os.path.join(asset_dir, "_check", "final_cache.json")
-    cache = read_cache(cache_path)
-    cache_ok = bool(cache and cache.get("mesh_sig") == mesh_sig)
-    cached_lod = cache.get("lod") if cache_ok else None
-    if mode == "final":
-        have_fbx = bool(glob.glob(os.path.join(asset_dir, "*.fbx"))) and \
-                   bool(glob.glob(os.path.join(asset_dir, "*.blend")))
-        if cache_ok and have_fbx:
-            fbx = True
-            print("[1/3 build] FBX/.blend cached (mesh unchanged)")
-        else:
-            code2, log2 = run([py, os.path.join(HERE, "run_blender.py"),
-                               os.path.abspath(a.generator), "--", "--out", out])
-            lines2 = [l for l in log2.splitlines() if l.strip()]
-            fbx = any("FBX + .blend" in l for l in lines2) and \
-                  bool(glob.glob(os.path.join(asset_dir, "*.fbx"))) and \
-                  bool(glob.glob(os.path.join(asset_dir, "*.blend")))
-            build_warns += [l.strip() for l in lines2 if "[WARN]" in l]
-            if not fbx:
-                print("[1/3 build] FBX export FAILED")
-                for l in lines2[-12:]:
-                    print("   " + l)
-            else:
-                print("[1/3 build] FBX/.blend written")
-                mesh_sig = mesh_signature(asset_dir)
-                cache_ok = bool(cache and cache.get("mesh_sig") == mesh_sig)
-                cached_lod = cache.get("lod") if cache_ok else None
-
-    lod = dict(checked=False, status="NOT_CHECKED", line=None, notes=[])
-    lod_future = None
-    lod_executor = None
-    if a.full:
-        if cached_lod and cached_lod.get("checked"):
-            lod = dict(cached_lod)
-            print(f"[lod] cached {lod.get('line') or lod.get('status')}")
-        else:
-            lscript = os.path.join(KIT, "tools", "qa", "lod_check.py")
-            if not os.path.exists(lscript):
-                lod["notes"].append("tools/qa/lod_check.py not found")
-                print("[lod] NOT_CHECKED - tools/qa/lod_check.py not found")
-            else:
-                import concurrent.futures as cf
-                lod_executor = cf.ThreadPoolExecutor(max_workers=1)
-                lod_future = lod_executor.submit(run, [py, lscript, os.path.join(out, asset), "--res", "512"])
+    for l in fbx_lines + lod_lines:
+        print(l)
 
     # 3) preview
     prev = None
@@ -235,7 +280,7 @@ def main():
     preview_status = "NOT_CHECKED"
     if not a.no_render:
         prev = os.path.join(ROOT, "previews", asset + ".png")
-        code, log = run([py, os.path.join(HERE, "render.py"), os.path.join(out, asset), "-o", prev, "--views", a.views, "--size", a.size])
+        code, log = jobs["render"].result()
         if code != 0:
             preview_status = "FAIL"
             print(f"[3/3 preview] FAILED: {log.strip().splitlines()[-1] if log.strip() else '?'}")
@@ -247,18 +292,15 @@ def main():
             print(f"[3/3 preview] {os.path.relpath(prev, ROOT)}  (history: {os.path.relpath(hist, ROOT)}"
                   + (", render cache hit)" if cached else ")"))
 
-    refs_exist = os.path.exists(os.path.join(ROOT, "photo_refs.json"))
     mism = None
     photo_lines = []
     photo_status = "NOT_APPLICABLE" if not refs_exist else "NOT_CHECKED"
     tiles = dict(checked=False, status="NOT_APPLICABLE" if not refs_exist else "NOT_CHECKED",
                  simplified=[], detail=[], detail_color=[], color_off=[], tiles_off=0, tiles_total=0)
-    if not a.no_render and refs_exist:
-        visual_cmd = [py, os.path.join(HERE, "visual_check.py"), os.path.join(out, asset)]
-        if a.tiles or a.full:
-            visual_cmd += ["--tiles", "--top", "3"]
+    if want_visual:
+        if want_tiles:
             tiles["checked"] = True
-        visual_code, log = run(visual_cmd)
+        visual_code, log = jobs["visual"].result()
         section = ""
         summary = ""
         for raw in log.splitlines():
@@ -316,8 +358,7 @@ def main():
             why = next((l for l in reversed(lines_l) if ".blend" in l or "Blender" in l), "")
             lod["notes"].append(why or (lines_l[-1] if lines_l else "no output"))
             print("[lod] NOT_CHECKED - needs FBX/.blend and Blender" + (f" ({why})" if why else ""))
-    if lod_executor is not None:
-        lod_executor.shutdown()
+    pool.shutdown()
     if "marginal=1" in (lod.get("line") or ""):
         lod.setdefault("notes", []).append("LOD margin is close to the 0.05% limit")
         print("[lod] WARN marginal - aim below 0.03% by closing the remaining silhouette gap")

@@ -1,4 +1,7 @@
-"""Load each visual-check asset/photo once and share warps and elevation renders."""
+"""Load each visual-check asset/photo once and share warps and elevation renders.
+
+Walls are checked in parallel on a thread pool; the printed lines and the files left in previews/ are the
+same as a one-by-one run. Set VISUAL_SERIAL=1 to run the walls one at a time (debugging)."""
 import argparse
 import os
 import sys
@@ -10,6 +13,7 @@ from proj import ROOT  # noqa: E402
 from objio import load_asset  # noqa: E402
 from render import Tex  # noqa: E402
 from extract_texture import warp  # noqa: E402
+import elevation_cache as EC  # noqa: E402
 import photo_check as PC  # noqa: E402
 import tile_compare as TC  # noqa: E402
 
@@ -36,11 +40,15 @@ def main():
     base = os.path.dirname(os.path.abspath(args.refs))
     asset, meshes, texdir, manifest = load_asset(args.path)
     tex = Tex(texdir, asset, False, "color")
-    photo_lines = []
-    tile_lines = []
-    photo_failed = 0
-    tile_failed = 0
-    for name, ref in jobs:
+    tiles_root = os.path.join(ROOT, "previews", "tiles")
+
+    def run_job(job):
+        """One wall: warp the photo, fetch the model view, run the photo and tile checks.
+        Returns (photo_lines, tile_lines, photo_failed, tile_failed, deferred image writes)."""
+        name, ref = job
+        photo_lines, tile_lines, saves = [], [], []
+        photo_failed = tile_failed = 0
+        PC._SAVE.sink = lambda im, path: saves.append((path, im))
         try:
             img = Image.open(os.path.join(base, ref["file"])).convert("RGB")
             if name == "satellite":
@@ -69,7 +77,7 @@ def main():
             if args.tiles:
                 try:
                     tile_lines += TC.run_wall(name, photo30, model30, 30, (15, 15) if name == "satellite" else (10, 9),
-                                              args.top, os.path.join(ROOT, "previews", "tiles", name), Wm, Hm)
+                                              args.top, os.path.join(tiles_root, name), Wm, Hm)
                 except Exception as exc:  # noqa
                     tile_failed += 1
                     tile_lines.append(f"INFO tiles {name} failed: {exc}")
@@ -77,6 +85,44 @@ def main():
             photo_failed += 1
             tile_failed += int(args.tiles)
             photo_lines.append(f"INFO     {name} preparation failed: {exc}")
+        finally:
+            PC._SAVE.sink = None
+        return photo_lines, tile_lines, photo_failed, tile_failed, saves
+
+    def write(item):
+        path, im = item
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        im.save(path, compress_level=PC.PNG_LEVEL)
+
+    # Walls are independent and the heavy steps (decode, warp, resize, filters, numpy) release the GIL,
+    # so they run on a thread pool sharing one asset/texture. Results are merged in job order, and image
+    # writes are deferred: when several walls target the same file only the last one (the file a serial
+    # run would leave behind) is encoded.
+    workers = 1 if os.environ.get("VISUAL_SERIAL") == "1" else max(1, min(len(jobs), os.cpu_count() or 2))
+    for mesh in meshes.values():                      # hash once up front instead of racing in the workers
+        EC._mesh_hash(mesh)
+    EC._texture_hash(tex)
+    if workers > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(run_job, jobs))
+            final = {}
+            for result in results:
+                for path, im in result[4]:
+                    final[os.path.normcase(os.path.abspath(path))] = (path, im)
+            list(pool.map(write, final.values()))
+    else:
+        results = [run_job(job) for job in jobs]
+        final = {}
+        for result in results:
+            for path, im in result[4]:
+                final[os.path.normcase(os.path.abspath(path))] = (path, im)
+        for item in final.values():
+            write(item)
+    photo_lines = [line for r in results for line in r[0]]
+    tile_lines = [line for r in results for line in r[1]]
+    photo_failed = sum(r[2] for r in results)
+    tile_failed = sum(r[3] for r in results)
     mismatch = sum(line.startswith("MISMATCH") for line in photo_lines)
     photo_status = "FAIL" if photo_failed or mismatch else "PASS"
     tile_status = "NOT_CHECKED" if not args.tiles else "FAIL" if tile_failed else "PASS"

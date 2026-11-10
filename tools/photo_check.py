@@ -30,6 +30,7 @@ import json
 import math
 import os
 import sys
+import threading
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
@@ -45,6 +46,7 @@ TOL_FLOOR = 0.10      # 10 % floor pitch tolerance
 TOL_BAY = 0.20        # 20 % bay pitch tolerance (info only, trees/balconies make it noisy)
 PX_PER_M = 20
 YAW = {"front": 0, "back": 180, "left": -90, "right": 90}
+PNG_LEVEL = 1         # zlib level for diagnostic sheets: same pixels, ~3x faster to encode than the default 6
 
 
 def p(s):
@@ -142,13 +144,45 @@ def cols_profile(g, z0=0.25, z1=0.9):
     return gx[r0:r1].mean(0)
 
 
+def dilate(mask, tol):
+    """Square (2*tol+1) binary dilation, identical to PIL MaxFilter(2*tol+1) on a 0/255 mask.
+
+    MaxFilter is a rank filter: O(pixels * window^2). A box dilation is separable and a window
+    "has any set pixel" test is a difference of two prefix sums, so this is O(pixels) for any tol."""
+    m = np.asarray(mask, bool)
+    for ax in (0, 1):
+        n = m.shape[ax]
+        if n == 0:
+            return m
+        shape = list(m.shape)
+        shape[ax] = n + 1
+        c = np.zeros(shape, np.int32)
+        np.cumsum(m, axis=ax, dtype=np.int32, out=c[1:] if ax == 0 else c[:, 1:])
+        i = np.arange(n)
+        m = np.take(c, np.minimum(i + tol + 1, n), ax) != np.take(c, np.maximum(i - tol, 0), ax)
+    return m
+
+
+_SAVE = threading.local()
+
+
+def save_image(im, path):
+    """Write a diagnostic PNG. A caller (visual_check) may install a per-thread sink to defer the write,
+    so images that a later wall overwrites are never encoded."""
+    sink = getattr(_SAVE, "sink", None)
+    if sink is not None:
+        sink(im, path)
+        return
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    im.save(path, compress_level=PNG_LEVEL)
+
+
 def chamfer_score(model_edges, photo_edges, tol_px):
     """Share of model edge pixels that have a photo edge within tol_px."""
-    if model_edges.sum() == 0:
+    total = model_edges.sum()
+    if total == 0:
         return 0.0
-    pe = Image.fromarray((photo_edges * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(2 * tol_px + 1))
-    near = np.asarray(pe) > 0
-    return float((near & model_edges).sum() / model_edges.sum())
+    return float((dilate(photo_edges, tol_px) & model_edges).sum() / total)
 
 
 def sheet(path, photo, model, overlay, lines):
@@ -161,8 +195,7 @@ def sheet(path, photo, model, overlay, lines):
         out.paste(i, (x, 22)); ImageDraw.Draw(out).text((x + 4, 4), t, fill=(0, 0, 0)); x += i.size[0] + 10
     for k, l in enumerate(lines):
         ImageDraw.Draw(out).text((6, h + 26 + 16 * k), l, fill=(160, 0, 0) if l.startswith("MISMATCH") else (0, 0, 0))
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    out.save(path)
+    save_image(out, path)
 
 
 def overlay_img(photo, model_edge_mask):

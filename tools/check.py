@@ -32,10 +32,11 @@ import sys
 import time
 
 import numpy as np
+from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import proj  # noqa: E402,F401  (decides the project folder, chdir; must come before argparse)
-from objio import MAPS, load_asset, load_png, tex_path  # noqa: E402
+from objio import MAPS, load_asset, tex_path  # noqa: E402
 from agent_actions import agent_summary as _agent_summary  # noqa: E402
 
 try:
@@ -77,58 +78,97 @@ def _ccw(P):
 
 
 def coplanar(mesh, min_area=1e-3):
-    """같은 방향·같은 평면(1 mm) 위에서 실제로 겹치는 면 쌍. 반대 방향 면끼리는 허용."""
+    """같은 방향·같은 평면(1 mm) 위에서 실제로 겹치는 면 쌍. 반대 방향 면끼리는 허용.
+
+    평면 묶기·투영·경계 상자·후보 쌍 찾기는 numpy 로 한 번에 하고, 상자가 실제로 겹치는 쌍만
+    다각형 교차(_clip)를 계산한다."""
     Q = mesh.quads()
     N, A = normals(Q)
-    groups = {}
-    for i in range(len(Q)):
-        if A[i] < 1e-8:
-            continue
-        n = N[i]
-        d = float(n @ Q[i].mean(0))
-        for key in ((tuple(np.round(n, 3)), round(d, 3)),):
-            groups.setdefault(key, []).append(i)
-    # 반올림 경계 보정: 평면 거리 키가 1 mm 차이 나는 이웃 그룹도 합침
-    merged = {}
-    for (n, d), idx in groups.items():
-        merged.setdefault(n, []).append((d, idx))
+    live = np.nonzero(A >= 1e-8)[0]
+    if not len(live):
+        return []
+    nkey = np.round(N[live], 3) + 0.0                        # -0.0 -> 0.0
+    dkey = np.round(np.einsum("ij,ij->i", N[live], Q[live].mean(1)), 3) + 0.0
+    _, first, inv = np.unique(nkey, axis=0, return_index=True, return_inverse=True)
+    inv = np.ravel(inv)
+    by_normal = np.argsort(inv, kind="stable")
+    bounds = np.concatenate(([0], np.cumsum(np.bincount(inv, minlength=len(first)))))
     bad = []
-    for n, lst in merged.items():
-        lst.sort()
-        nv = np.array(n, float)
-        nv /= np.linalg.norm(nv)
+    for g in np.argsort(first, kind="stable"):               # 법선이 처음 나온 순서 (예시 출력 순서 유지)
+        members = by_normal[bounds[g]:bounds[g + 1]]          # live 안의 위치, 면 번호 오름차순
+        if len(members) < 2:
+            continue
+        n = nkey[members[0]]
+        nv = n / np.linalg.norm(n)
         if abs(nv[2]) > 0.99:
             u, v = np.array([1.0, 0, 0]), np.array([0, 1.0, 0])
         else:
             u = np.cross([0, 0, 1.0], nv); u /= np.linalg.norm(u); v = np.cross(nv, u)
+        dm = dkey[members]
+        o = np.argsort(dm, kind="stable")
+        members, dm = members[o], dm[o]
         k = 0
-        while k < len(lst):
-            d0 = lst[k][0]
-            idx = []
-            while k < len(lst) and lst[k][0] - d0 <= 0.0015:
-                idx += lst[k][1]; k += 1
-            if len(idx) < 2:
-                continue
-            P = [_ccw([(float(q @ u), float(q @ v)) for q in _uniq(Q[i])]) for i in idx]
-            bb = np.array([(min(x for x, _ in p), min(y for _, y in p), max(x for x, _ in p), max(y for _, y in p)) for p in P])
-            order = np.argsort(bb[:, 0])
-            for a_ in range(len(order)):
-                i = order[a_]
-                for b_ in range(a_ + 1, len(order)):
-                    j = order[b_]
-                    if bb[j, 0] >= bb[i, 2]:
-                        break
-                    if not (bb[i, 1] < bb[j, 3] and bb[j, 1] < bb[i, 3]):
-                        continue
-                    inter = P[i]
-                    for e in range(len(P[j])):
-                        inter = _clip(inter, P[j][e], P[j][(e + 1) % len(P[j])])
-                        if not inter:
-                            break
-                    if inter and _area(inter) > min_area:
-                        bad.append(dict(faces=(int(idx[i]), int(idx[j])), area=round(_area(inter), 4),
-                                        at=np.round(Q[idx[i]].mean(0), 2).tolist(), normal=list(n)))
+        while k < len(members):
+            # 반올림 경계 보정: 평면 거리 키가 1 mm 차이 나는 이웃 그룹도 합침
+            k1 = k + 1
+            while k1 < len(members) and dm[k1] - dm[k] <= 0.0015:
+                k1 += 1
+            idx = live[members[k:k1]]
+            k = k1
+            if len(idx) >= 2:
+                _coplanar_group(Q, idx, u, v, n, min_area, bad)
     return bad
+
+
+def _coplanar_group(Q, idx, u, v, n, min_area, bad):
+    """한 평면 위의 면들(idx)에서 겹치는 쌍을 bad 에 추가."""
+    pts = Q[idx]                                              # (m,4,3)
+    px = pts[..., 0] * u[0] + pts[..., 1] * u[1] + pts[..., 2] * u[2]
+    py = pts[..., 0] * v[0] + pts[..., 1] * v[1] + pts[..., 2] * v[2]
+    step = np.linalg.norm(pts - np.roll(pts, 1, axis=1), axis=2)      # 이전 꼭짓점까지 거리 ([:,0] = 0번-3번)
+    simple = (step[:, 1:] > 1e-9).all(1) & (step[:, 0] >= 1e-9)        # 겹친 점이 없는 사각형
+    t = px * np.roll(py, -1, axis=1) - np.roll(px, -1, axis=1) * py
+    flip = (((t[:, 0] + t[:, 1]) + t[:, 2]) + t[:, 3]) <= 0
+    bb = np.stack((px.min(1), py.min(1), px.max(1), py.max(1)), 1)
+    polys = {}
+
+    def poly(i):
+        if i not in polys:
+            if simple[i]:
+                P = list(zip(px[i].tolist(), py[i].tolist()))
+                polys[i] = P[::-1] if flip[i] else P
+            else:                                             # 삼각형 등: 겹친 점을 뺀 뒤 방향 맞춤
+                polys[i] = _ccw([(float(q @ u), float(q @ v)) for q in _uniq(Q[idx[i]])])
+        return polys[i]
+
+    order = np.argsort(bb[:, 0])                            # 기본 정렬: 동률 순서가 예시의 (i, j) 를 정한다
+    x0s = bb[order, 0]
+    end = np.searchsorted(x0s, bb[order, 2], side="left")     # x0[j] < x1[i] 인 j 의 끝
+    count = np.maximum(end - (np.arange(len(order)) + 1), 0)
+    limit = 1 << 22                                           # 한 번에 펼치는 후보 쌍 수
+    a0 = 0
+    while a0 < len(order):
+        a1 = a0 + 1
+        tot = int(count[a0])
+        while a1 < len(order) and tot + int(count[a1]) <= limit:
+            tot += int(count[a1]); a1 += 1
+        if tot:
+            cnt = count[a0:a1]
+            ia = np.repeat(np.arange(a0, a1), cnt)
+            ib = ia + 1 + (np.arange(tot) - np.repeat(np.cumsum(cnt) - cnt, cnt))
+            i_, j_ = order[ia], order[ib]
+            hit = (bb[i_, 1] < bb[j_, 3]) & (bb[j_, 1] < bb[i_, 3])
+            for i, j in zip(i_[hit].tolist(), j_[hit].tolist()):
+                inter = poly(i)
+                Pj = poly(j)
+                for e in range(len(Pj)):
+                    inter = _clip(inter, Pj[e], Pj[(e + 1) % len(Pj)])
+                    if not inter:
+                        break
+                if inter and _area(inter) > min_area:
+                    bad.append(dict(faces=(int(idx[i]), int(idx[j])), area=round(_area(inter), 4),
+                                    at=np.round(Q[idx[i]].mean(0), 2).tolist(), normal=list(n)))
+        a0 = a1
 
 
 def _uniq(q):
@@ -145,12 +185,19 @@ class RayMesh:
     """메인 메시 삼각형 + 알파 샘플링 (알파로 뚫린 곳은 통과)."""
 
     def __init__(self, mesh, alpha=None):
-        T, UV = [], []
-        for f, uv in zip(mesh.faces, mesh.uvs):
-            for k in range(1, len(f) - 1):
-                T.append(mesh.verts[[f[0], f[k], f[k + 1]]]); UV.append(uv[[0, k, k + 1]])
-        self.T = np.array(T).reshape(-1, 3, 3)
-        self.UV = np.array(UV).reshape(-1, 3, 2)
+        F, L, UVp = mesh.padded()
+        if UVp is not None and len(L) and L.min() >= 3 and L.max() <= 4:     # 면마다 (0,1,2) [, (0,2,3)] 를 한 번에
+            V = np.asarray(mesh.verts, float)[F]
+            two = np.stack((np.ones(len(L), bool), L == 4), 1)                   # 삼각형은 첫 조각만
+            self.T = np.stack((V[:, [0, 1, 2]], V[:, [0, 2, 3]]), 1)[two]
+            self.UV = np.stack((UVp[:, [0, 1, 2]], UVp[:, [0, 2, 3]]), 1)[two]
+        else:
+            T, UV = [], []
+            for f, uv in zip(mesh.faces, mesh.uvs):
+                for k in range(1, len(f) - 1):
+                    T.append(mesh.verts[[f[0], f[k], f[k + 1]]]); UV.append(uv[[0, k, k + 1]])
+            self.T = np.array(T).reshape(-1, 3, 3)
+            self.UV = np.array(UV).reshape(-1, 3, 2)
         self.alpha = alpha
         self.lo = self.T.min(1); self.hi = self.T.max(1)
 
@@ -167,7 +214,10 @@ class RayMesh:
             D = directions[start:start + 32, None, :]
             end = O + D * maxd
             lo, hi = np.minimum(O, end) - 1e-6, np.maximum(O, end) + 1e-6
-            broad = np.all((self.hi[None] >= lo) & (self.lo[None] <= hi), axis=2)
+            broad = (self.hi[None, :, 0] >= lo[:, :, 0]) & (self.lo[None, :, 0] <= hi[:, :, 0])   # 축별로 (큰 3D 임시 배열 없이)
+            for ax in (1, 2):
+                broad &= self.hi[None, :, ax] >= lo[:, :, ax]
+                broad &= self.lo[None, :, ax] <= hi[:, :, ax]
             candidates = [np.nonzero(row)[0] for row in broad]
             width = max((len(ids) for ids in candidates), default=0)
             if not width:
@@ -275,8 +325,9 @@ def check_asset(path, args):
     degen = np.nonzero(A < 1e-6)[0]
     if len(degen):
         warn("degenerate", f"{len(degen)} zero-area faces", [np.round(Q[i].mean(0), 2).tolist() for i in degen])
-    npl = [i for i in range(len(Q)) if len(main.faces[i]) == 4 and A[i] > 1e-6 and abs((Q[i, 2] - Q[i, 0]) @ N[i]) > 2e-3]
-    if npl:
+    is_quad = np.fromiter((len(f) == 4 for f in main.faces), bool, len(main.faces))
+    npl = np.nonzero(is_quad & (A > 1e-6) & (np.abs(np.einsum("ij,ij->i", Q[:, 2] - Q[:, 0], N)) > 2e-3))[0]
+    if len(npl):
         warn("nonplanar", f"{len(npl)} non-planar quads", [np.round(Q[i].mean(0), 2).tolist() for i in npl])
     if lot:
         w_need = math.ceil(info["size"][0] / 8.0)
@@ -314,7 +365,6 @@ def check_asset(path, args):
                 (err if mp in ("BaseColor", "Normal", "MaskMap") and not lod2 else warn)(
                     "tex", f"{'LOD2_' if lod2 else ''}{mp}.png missing")
                 continue
-            from PIL import Image
             with Image.open(p) as im:
                 sizes[("LOD2_" if lod2 else "") + mp] = (im.size, im.mode)
     info["textures"] = {k: f"{v[0][0]}x{v[0][1]} {v[1]}" for k, v in sizes.items()}
@@ -332,9 +382,11 @@ def check_asset(path, args):
     alpha = None
     bp = tex_path(texdir, asset, "BaseColor")
     if bp:
-        alpha = load_png(bp)[..., 3]
+        alpha = _alpha_u8(bp)
     if tex_path(texdir, asset, "Normal"):
-        nm = load_png(tex_path(texdir, asset, "Normal"), "RGB").reshape(-1, 3).mean(0)
+        from PIL import ImageStat
+        with Image.open(tex_path(texdir, asset, "Normal")) as im:      # 채널 평균만 필요: 히스토그램으로 (float 배열 없이)
+            nm = np.array(ImageStat.Stat(im.convert("RGB")).mean)
         if nm[2] < 180:
             warn("tex", f"Normal mean {np.round(nm).tolist()} - is it really a normal map (expected ~128,128,255)?")
 
@@ -346,17 +398,33 @@ def check_asset(path, args):
         AS = at["size"]
         boxes = np.array([(x / AS, 1 - (y + h) / AS, (x + w) / AS, 1 - y / AS) for x, y, w, h in rects.values()])
         out = []
-        for i, uv in enumerate(main.uvs):
-            u0, v0 = uv.min(0); u1, v1 = uv.max(0)
-            e = 1.0 / AS
-            if not np.any((boxes[:, 0] - e <= u0) & (boxes[:, 1] - e <= v0) & (boxes[:, 2] + e >= u1) & (boxes[:, 3] + e >= v1)):
-                out.append(np.round(Q[i].mean(0), 2).tolist())
+        e = 1.0 / AS
+        if main.uvs and len(boxes):
+            UVp = main.padded()[2]
+            if UVp is not None:                                   # 채운 점은 마지막 점의 복사라 최소·최대가 같다
+                lo_uv, hi_uv = UVp.min(1), UVp.max(1)             # (F,2)
+            else:
+                lo_uv = np.array([uv.min(0) for uv in main.uvs])
+                hi_uv = np.array([uv.max(0) for uv in main.uvs])
+            # 면 x 칸 포함 여부를 한 번에 (같은 UV 상자를 쓰는 면이 많으므로 고유 상자만 검사)
+            key, inv = np.unique(np.hstack((lo_uv, hi_uv)), axis=0, return_inverse=True)
+            inside = ((boxes[None, :, 0] - e <= key[:, None, 0]) & (boxes[None, :, 1] - e <= key[:, None, 1]) &
+                      (boxes[None, :, 2] + e >= key[:, None, 2]) & (boxes[None, :, 3] + e >= key[:, None, 3])).any(1)
+            out = [np.round(Q[i].mean(0), 2).tolist() for i in np.nonzero(~inside[np.ravel(inv)])[0]]
+        elif main.uvs:
+            out = [np.round(Q[i].mean(0), 2).tolist() for i in range(len(main.uvs))]
         if out:
             err("atlas", f"ATLAS_UV: {len(out)} faces with UV outside a single atlas cell (neighbour color bleeds)", out)
     def _uvarea(uv):
         a, b = uv[2] - uv[0], (uv[3] if len(uv) > 3 else uv[2]) - uv[1]
         return 0.5 * abs(a[0] * b[1] - a[1] * b[0]) if len(uv) > 3 else 0.5 * abs((uv[1] - uv[0])[0] * a[1] - (uv[1] - uv[0])[1] * a[0])
-    uva = np.array([_uvarea(uv) for uv in main.uvs])
+    _, FLn, UVp = main.padded()
+    if UVp is not None and len(FLn) and FLn.min() >= 3:
+        ua, ub, uc = UVp[:, 2] - UVp[:, 0], UVp[:, 3] - UVp[:, 1], UVp[:, 1] - UVp[:, 0]
+        uva = np.where(FLn > 3, 0.5 * np.abs(ua[:, 0] * ub[:, 1] - ua[:, 1] * ub[:, 0]),
+                       0.5 * np.abs(uc[:, 0] * ua[:, 1] - uc[:, 1] * ua[:, 0]))
+    else:
+        uva = np.array([_uvarea(uv) for uv in main.uvs])
     dens = np.sqrt(np.maximum(uva, 0) * S * S / np.maximum(A, 1e-9))
     big = (A > 1.0) & (uva > 1e-9)
     if big.any():
@@ -424,9 +492,17 @@ def check_asset(path, args):
     return dict(asset=asset, errors=E, warnings=W, info=info)
 
 
+def _alpha_u8(path):
+    """BaseColor 알파만 uint8 로 (4096² RGBA 를 float32 로 바꾸면 256 MB·0.1 s). 비교는 >= 127.5 그대로 성립."""
+    with Image.open(path) as im:
+        if im.mode in ("RGB", "L") and "transparency" not in im.info:
+            return np.full((im.size[1], im.size[0]), 255, np.uint8)
+        return np.asarray(im.convert("RGBA").getchannel("A"))
+
+
 def _lod2_alpha(texdir, asset):
     p = tex_path(texdir, asset, "BaseColor", lod2=True)
-    return load_png(p)[..., 3] if p else None
+    return _alpha_u8(p) if p else None
 
 
 def print_report(r):

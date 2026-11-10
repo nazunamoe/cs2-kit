@@ -2457,8 +2457,15 @@ def run(tower_fn, atlas=None, argv=None):
     asset = os.path.basename(os.path.normpath(folder))
     for kind in ("BaseColor", "ControlMask", "Emissive", "MaskMap", "Normal"):
         src = os.path.join(folder, "%s_%s.png" % (asset, kind))
-        if os.path.exists(src):
-            shutil.copyfile(src, os.path.join(folder, "%s_LOD1_%s.png" % (asset, kind)))
+        dst = os.path.join(folder, "%s_LOD1_%s.png" % (asset, kind))
+        if not os.path.exists(src):
+            continue
+        # export_asset already writes these copies with the atlas. Copy only when one is missing or stale:
+        # rewriting five 4096 px maps on every run also invalidates the preview cache and races the checks.
+        if (os.path.exists(dst) and os.path.getsize(dst) == os.path.getsize(src)
+                and os.path.getmtime(dst) >= os.path.getmtime(src)):
+            continue
+        shutil.copyfile(src, dst)
     return folder
 
 

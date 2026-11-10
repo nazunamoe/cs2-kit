@@ -28,12 +28,12 @@ import os
 import sys
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from extract_texture import warp  # noqa: E402
 from objio import load_asset  # noqa: E402
-from photo_check import YAW, edges, extents, gray  # noqa: E402
+from photo_check import YAW, dilate, edges, extents, gray, save_image  # noqa: E402
 from render import Tex  # noqa: E402
 
 from proj import ROOT, KIT, NAME  # noqa: E402,F401  (project folder; chdir done)
@@ -51,8 +51,7 @@ def model_crop(meshes, tex, yaw, pitch, size, box=None):
 
 
 def near(mask, tol):
-    im = Image.fromarray((mask * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(2 * tol + 1))
-    return np.asarray(im) > 0
+    return dilate(mask, tol)
 
 
 def score(pe, me, tol):
@@ -93,8 +92,23 @@ def zones(arr, ppm, axis, min_len_m, jump=9.0):
     lab = np.stack([np.convolve(lab[:, i], np.ones(k) / k, mode="same") for i in range(3)], 1)
     cut = [0]
     ml = int(min_len_m * ppm)
+    # Colour step at every position from prefix sums (one pass) instead of two slice means per position.
+    # It only nominates candidates (with a safety margin); each one is re-tested with the exact slice
+    # means below, so the cuts are the same as a plain position-by-position scan.
+    idx = np.arange(max(ml, 1), max(n - ml, max(ml, 1)))
+    if len(idx):
+        ps = np.concatenate((np.zeros((1, 3)), np.cumsum(lab, 0)))
+        lo, hi = np.maximum(idx - w, 0), np.minimum(idx + w, n)
+        step = np.linalg.norm((ps[idx] - ps[lo]) / (idx - lo)[:, None] - (ps[hi] - ps[idx]) / (hi - idx)[:, None], axis=1)
+        cand = idx[step > jump - 1e-6]
+    else:
+        cand = idx
     i = ml
     while i < n - ml:
+        k = int(np.searchsorted(cand, i))
+        if k == len(cand):
+            break
+        i = int(cand[k])
         a, b = lab[max(0, i - w):i].mean(0), lab[i:i + w].mean(0)
         if np.linalg.norm(a - b) > jump and i - cut[-1] >= ml:
             # move to the strongest change within +-w/2
@@ -167,7 +181,7 @@ def run_wall(name, photo, model, ppm, tile_m, top, outdir, wall_w_m, wall_h_m):
         d.rectangle([x0 * scale, y0 * scale, x1 * scale, y1 * scale], outline=(255, 255, 255))
         d.text((x0 * scale + 3, y0 * scale + 2), f"r{r}c{c}" + (f" {rec * 100:.0f}%" if rec is not None else ""), fill=(0, 0, 0))
     os.makedirs(outdir, exist_ok=True)
-    hm.save(os.path.join(os.path.dirname(outdir), f"{name}_map.png"))
+    save_image(hm, os.path.join(os.path.dirname(outdir), f"{name}_map.png"))
     # tile sheets for the worst ones
     for r, c, rec, pre, (x0, y0, x1, y1) in worst[:top]:
         a, b = photo.crop((x0, y0, x1, y1)), model.crop((x0, y0, x1, y1))
@@ -181,7 +195,7 @@ def run_wall(name, photo, model, ppm, tile_m, top, outdir, wall_w_m, wall_h_m):
         x = 0
         for i, t in zip(ims, ("photo", "model", "blue=photo edges red=model edges")):
             sheet.paste(i, (x, 22)); ImageDraw.Draw(sheet).text((x + 3, 5), t, fill=(0, 0, 0)); x += i.size[0] + 10
-        sheet.save(os.path.join(outdir, f"r{r:02d}c{c:02d}.png"))
+        save_image(sheet, os.path.join(outdir, f"r{r:02d}c{c:02d}.png"))
     out = []
     for r, c, rec, pre, (x0, y0, x1, y1) in worst[:top]:
         xm0, xm1 = x0 / ppm, x1 / ppm
