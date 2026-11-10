@@ -589,6 +589,35 @@ def observe(args):
     emit({"status": "OK", "observations": os.path.relpath(OBSERVATIONS, ROOT),
           "next_action": {"command": None, "reason": "unchanged observed photos do not need to be read again"}}, args.json)
 
+def sync_task(args):
+    require_project()
+    state = read_json(STATE)
+    gate = state.get("last_gate")
+    if not gate:
+        raise SystemExit("no last gate found; run a cycle first")
+    task_path = os.path.join(ROOT, "TASK.md")
+    if not os.path.isfile(task_path):
+        raise SystemExit("TASK.md not found in project root")
+    with open(task_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    updated = False
+    checks = gate.get("checks", {})
+    for i, line in enumerate(lines):
+        for key, status in checks.items():
+            if f"[ ] {key}" in line and status == "PASS":
+                lines[i] = line.replace(f"[ ] {key}", f"[x] {key}")
+                updated = True
+    if updated:
+        with open(task_path, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+    emit({"status": "SYNCED" if updated else "NO_CHANGE", "project": NAME, 
+          "next_action": {"command": None, "reason": "TASK.md is now consistent with last gate results"}}, args.json)
+
+def analyze_visual(args):
+    require_project()
+    emit({"status": "ANALYSIS_PENDING", "artifact": args.artifact, 
+          "next_action": {"command": None, "reason": "Compare the artifact with photo_refs and record findings in observations.json"}}, args.json)
+
 
 def review(args):
     require_project()
@@ -789,6 +818,23 @@ def main():
     p.add_argument("--side", default="")
     p.add_argument("--note", required=True)
     p.set_defaults(fn=observe)
+    p = sub.add_parser("update-spec")
+    p.add_argument("--project", required=True)
+    p.add_argument("--spec", required=True)
+    p.add_argument("--key", required=True)
+    p.add_argument("--value", required=True)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=lambda args: run([PY, os.path.join(KIT, "tools", "update_spec.py"), 
+                                        "--project", args.project, "--spec", args.spec, 
+                                        "--key", args.key, "--value", args.value, 
+                                        "--json" if args.json else ""]))
+    p = sub.add_parser("sync-task")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=sync_task)
+    p = sub.add_parser("analyze-visual")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--artifact", required=True)
+    p.set_defaults(fn=analyze_visual)
     p = sub.add_parser("review")
     p.add_argument("--json", action="store_true")
     p.add_argument("--status", choices=("PASS", "FAIL", "NEEDS_HUMAN_REVIEW"), required=True)
