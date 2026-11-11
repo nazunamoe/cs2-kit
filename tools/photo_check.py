@@ -42,8 +42,8 @@ from render import Tex  # noqa: E402
 
 from proj import ROOT, KIT, NAME  # noqa: E402,F401  (project folder; chdir done)
 TOL_RATIO = 0.08      # 8 % size/ratio tolerance
-TOL_FLOOR = 0.15      # 15 % floor pitch tolerance (photo measurement noise)
-TOL_BAY = 0.10        # 10 % bay pitch tolerance (stricter, info only)
+TOL_FLOOR = 0.10      # 10 % floor pitch tolerance
+TOL_BAY = 0.20        # 20 % bay pitch tolerance (info only, trees/balconies make it noisy)
 PX_PER_M = 20
 YAW = {"front": 0, "back": 180, "left": -90, "right": 90}
 PNG_LEVEL = 1         # zlib level for diagnostic sheets: same pixels, ~3x faster to encode than the default 6
