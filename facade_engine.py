@@ -315,8 +315,21 @@ def make_atlas(size=4096):
 
 # ---------------------------------------------------------------- (3) heightfield mass
 
+# ---- memoization cache for heightfield/walls_of (same blocks reused multiple times per tower)
+_HF_CACHE = {}
+_WO_CACHE = {}
+
+
+def _blocks_key(blocks):
+    """블록 리스트를 해시 가능한 키로 변환 (부동소수점 안정성을 위해 round)."""
+    return tuple(tuple(round(v, 3) for v in b) for b in blocks)
+
+
 def heightfield(blocks):
     """compressed grid of all block edges -> cell heights (max roof of covering blocks)"""
+    key = _blocks_key(blocks)
+    if key in _HF_CACHE:
+        return _HF_CACHE[key]
     xs = sorted(set(round(v, 3) for b in blocks for v in (b[0], b[1])))
     ys = sorted(set(round(v, 3) for b in blocks for v in (b[2], b[3])))
     H = []
@@ -327,11 +340,16 @@ def heightfield(blocks):
             cx = (xs[i] + xs[i + 1]) / 2
             row.append(max([b[4] for b in blocks if b[0] <= cx <= b[1] and b[2] <= cy <= b[3]] or [0.0]))
         H.append(row)
-    return xs, ys, H
+    result = (xs, ys, H)
+    _HF_CACHE[key] = result
+    return result
 
 
 def walls_of(xs, ys, H):
     """outer wall pieces: dict(axis, c, s, a0, a1, z0, z1), merged along each grid line"""
+    key = (tuple(xs), tuple(ys), tuple(tuple(row) for row in H))
+    if key in _WO_CACHE:
+        return _WO_CACHE[key]
     nx, ny = len(xs) - 1, len(ys) - 1
     hget = lambda i, j: H[j][i] if 0 <= i < nx and 0 <= j < ny else 0.0
     out = []
@@ -367,7 +385,14 @@ def walls_of(xs, ys, H):
             if run:
                 out.append(dict(axis="y", c=ys[j], s=run[0][0], a0=run[1], a1=run[2], z0=run[0][1], z1=run[0][2]))
             run = [seg, xs[i], xs[i + 1] if i < nx else None] if seg else None
+    _WO_CACHE[key] = out
     return out
+
+
+def clear_heightfield_cache():
+    """타워가 바뀔 때 호출 (예: build_volume_spec 사이)."""
+    _HF_CACHE.clear()
+    _WO_CACHE.clear()
 
 
 def roofs_of(xs, ys, H):

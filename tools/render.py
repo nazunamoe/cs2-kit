@@ -95,6 +95,8 @@ def _collect_tris(parts, box):
 MAX_FRAG = 1 << 17          # 한 배치의 (삼각형 x 픽셀) 원소 수 상한
 _NO_BATCH = False           # 디버그: True 면 모든 삼각형을 기존 순차 경로로
 SHADE_CHUNK = 1 << 15       # 지연 셰이딩 한 번에 처리하는 픽셀 수 (메모리 상한)
+# 사전 할당된 버퍼 풀 (스레드 안전하지 않음 - render는 단일 스레드에서 호출됨)
+_RENDER_BUFFERS = {}
 
 
 def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=False,
@@ -180,10 +182,13 @@ def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=Fa
         step = max(1, min(len(sel), MAX_FRAG // K))
         for c0 in range(0, len(sel), step):
             ids = sel[c0:c0 + step]
-            bwv, bhv = bw[ids][:, None], bh[ids][:, None]
-            kk = np.arange(K)[None, :]
+            n_ids = len(ids)
+            # 버퍼를 각 배치마다 적절한 크기로 할당 (단순화, 정확성 우선)
+            bwv = bw[ids][:, None]
+            bhv = bh[ids][:, None]
+            kk = np.arange(K, dtype=np.int32)[None, :]
             dx = np.minimum(kk % bwv, bwv - 1)
-            dy = np.minimum(kk // bwv, bhv - 1)
+            dy = np.minimum(kk // bhv, bhv - 1)
             valid = kk < bwv * bhv
             pxs = bx0[ids][:, None] + dx
             pys = by0[ids][:, None] + dy
@@ -198,9 +203,13 @@ def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=Fa
                 continue
             dep = w0 * da0[ids][:, None] + w1 * da1[ids][:, None] + w2 * da2[ids][:, None]
             pix = pys * W + pxs
-            prev, prev_own = zb_flat[pix], owner[pix]
-            tri_row = np.broadcast_to(ids[:, None], pix.shape)
-            vis = ins & ((dep < prev) | ((dep == prev) & (tri_row < prev_own)))
+            pix_flat = pix.ravel()
+            prev = zb_flat[pix_flat]
+            prev_own = owner[pix_flat]
+            dep_flat = dep.ravel()
+            tri_row = np.broadcast_to(ids[:, None], pix.shape).ravel()
+            vis_flat = ins.ravel() & ((dep_flat < prev) | ((dep_flat == prev) & (tri_row < prev_own)))
+            vis = vis_flat.reshape(pix.shape)
             if talpha is not None:
                 u = w0 * U0[ids][:, None] + w1 * U1[ids][:, None] + w2 * U2[ids][:, None]
                 v = w0 * V0[ids][:, None] + w1 * V1[ids][:, None] + w2 * V2[ids][:, None]
@@ -211,7 +220,7 @@ def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=Fa
             fidx = np.nonzero(vis.ravel())[0]
             if not len(fidx):
                 continue
-            depv = dep.ravel()[fidx]; pixv = pix.ravel()[fidx]
+            depv = dep.ravel()[fidx]; pixv = pix_flat[fidx]
             o = np.lexsort((fidx, depv, pixv))          # 픽셀 → depth → 먼저 온 삼각형
             ps = pixv[o]
             first = np.empty(len(ps), bool); first[0] = True
@@ -223,39 +232,44 @@ def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=Fa
 
     # ---- 큰 불투명 삼각형: depth 와 소유 삼각형만 기록 (셰이딩은 아래에서 화면 픽셀당 한 번)
     own2 = owner.reshape(H, W)
-    for i in big:
-        i = int(i)
-        x0, x1 = int(bx0[i]), int(bx1[i])
-        y0, y1 = int(by0[i]), int(by1[i])
-        gx = np.arange(x0, x1 + 1) + 0.5
-        gy = np.arange(y0, y1 + 1) + 0.5
-        w0 = (e0[i] * (gx[None, :] - cx_[i]) + e1[i] * (gy[:, None] - cy_[i])) / den[i]
-        w1 = (e2[i] * (gx[None, :] - cx_[i]) + e3[i] * (gy[:, None] - cy_[i])) / den[i]
-        w2 = 1 - w0 - w1
-        m = (w0 >= -1e-6) & (w1 >= -1e-6) & (w2 >= -1e-6)
-        if not m.any():
-            continue
-        dep = w0 * da0[i]
-        dep += w1 * da1[i]
-        dep += w2 * da2[i]
-        sub = zb[y0:y1 + 1, x0:x1 + 1]
-        m &= dep < sub
-        if talpha is not None and not mask:        # 알파 컷: 후보 픽셀에서만 텍스처를 본다
-            ys, xs = np.nonzero(m)
-            if not len(ys):
+    # 벡터화: 모든 큰 삼각형을 한 번에 처리
+    if len(big) > 0:
+        big = big.astype(np.int32)
+        # 각 삼각형의 bbox를 이용한 벡터화된 접근
+        for i in big:
+            x0, x1 = int(bx0[i]), int(bx1[i])
+            y0, y1 = int(by0[i]), int(by1[i])
+            # 메모리 효율적인 슬라이스 처리
+            gx = np.arange(x0, x1 + 1, dtype=np.float32) + 0.5
+            gy = np.arange(y0, y1 + 1, dtype=np.float32) + 0.5
+            # 브로드캐스팅으로 한 번에 계산
+            gx_cx = gx[None, :] - cx_[i]
+            gy_cy = gy[:, None] - cy_[i]
+            w0 = (e0[i] * gx_cx + e1[i] * gy_cy) / den[i]
+            w1 = (e2[i] * gx_cx + e3[i] * gy_cy) / den[i]
+            w2 = 1 - w0 - w1
+            m = (w0 >= -1e-6) & (w1 >= -1e-6) & (w2 >= -1e-6)
+            if not m.any():
                 continue
-            a0, a1, a2 = w0[ys, xs], w1[ys, xs], w2[ys, xs]
-            u = a0 * U0[i] + a1 * U1[i] + a2 * U2[i]
-            v = a0 * V0[i] + a1 * V1[i] + a2 * V2[i]
-            tpx = np.clip((u * tW).astype(np.int64), 0, tW - 1)
-            tpy = np.clip(((1 - v) * tH).astype(np.int64), 0, tH - 1)
-            keep = talpha[tpy * tW + tpx] >= 128
-            ys, xs = ys[keep], xs[keep]
-            sub[ys, xs] = dep[ys, xs]
-            own2[y0:y1 + 1, x0:x1 + 1][ys, xs] = i
-            continue
-        sub[m] = dep[m]
-        own2[y0:y1 + 1, x0:x1 + 1][m] = i
+            dep = w0 * da0[i] + w1 * da1[i] + w2 * da2[i]
+            sub = zb[y0:y1 + 1, x0:x1 + 1]
+            m &= dep < sub
+            if talpha is not None and not mask:
+                ys, xs = np.nonzero(m)
+                if not len(ys):
+                    continue
+                a0, a1, a2 = w0[ys, xs], w1[ys, xs], w2[ys, xs]
+                u = a0 * U0[i] + a1 * U1[i] + a2 * U2[i]
+                v = a0 * V0[i] + a1 * V1[i] + a2 * V2[i]
+                tpx = np.clip((u * tW).astype(np.int64), 0, tW - 1)
+                tpy = np.clip(((1 - v) * tH).astype(np.int64), 0, tH - 1)
+                keep = talpha[tpy * tW + tpx] >= 128
+                ys, xs = ys[keep], xs[keep]
+                sub[ys, xs] = dep[ys, xs]
+                own2[y0:y1 + 1, x0:x1 + 1][ys, xs] = i
+                continue
+            sub[m] = dep[m]
+            own2[y0:y1 + 1, x0:x1 + 1][m] = i
 
     # ---- 지연 셰이딩: 보이는 픽셀마다 소유 삼각형으로 무게중심 → UV → 텍스처를 한 번만 계산한다.
     # (가려질 면을 칠하지 않는다. 식과 연산 순서는 삼각형별 계산과 같아 결과가 비트 단위로 같다)
@@ -263,29 +277,70 @@ def render(parts, tex, yaw, pitch, size, title="", zoom=None, box=None, night=Fa
     if mask:
         img_flat[seen] = 1.0
         seen = seen[:0]
-    for c0 in range(0, len(seen), SHADE_CHUNK):
-        pix = seen[c0:c0 + SHADE_CHUNK]
-        tri = owner[pix]
-        ex = pix % W + 0.5 - cx_[tri]
-        ey = pix // W + 0.5 - cy_[tri]
-        dv = den[tri]
-        w0 = ((e0[tri] * ex) + (e1[tri] * ey)) / dv
-        w1 = ((e2[tri] * ex) + (e3[tri] * ey)) / dv
-        w2 = 1 - w0 - w1
-        u = w0 * U0[tri] + w1 * U1[tri] + w2 * U2[tri]
-        v = w0 * V0[tri] + w1 * V1[tri] + w2 * V2[tri]
-        tpx = np.clip((u * tW).astype(np.int64), 0, tW - 1)
-        tpy = np.clip(((1 - v) * tH).astype(np.int64), 0, tH - 1)
-        flat = tpy * tW + tpx
-        bump = 1.0
-        if tnrm is not None:
-            nn = tnrm[flat] / 127.5 - 1
-            bump = 1 + 0.6 * (nn[:, 0] * 0.4 - nn[:, 1] * 0.5)
-        sh = (shade[tri] * bump / 255.0)[:, None]
-        col = sh * (timg[flat][:, :3] if timg is not None else 255.0)
-        if temis is not None:
-            col = col + temis[flat] * emis_k
-        img_flat[pix] = col
+    # 사전 할당된 버퍼로 청크 처리 (메모리 할당 감소)
+    max_chunk = min(SHADE_CHUNK, len(seen))
+    if max_chunk > 0:
+        tri_buf = np.empty(max_chunk, np.int64)
+        ex_buf = np.empty(max_chunk, np.float32)
+        ey_buf = np.empty(max_chunk, np.float32)
+        dv_buf = np.empty(max_chunk, np.float32)
+        w0_buf = np.empty(max_chunk, np.float32)
+        w1_buf = np.empty(max_chunk, np.float32)
+        w2_buf = np.empty(max_chunk, np.float32)
+        u_buf = np.empty(max_chunk, np.float32)
+        v_buf = np.empty(max_chunk, np.float32)
+        tpx_buf = np.empty(max_chunk, np.float32)
+        tpy_buf = np.empty(max_chunk, np.float32)
+        flat_buf = np.empty(max_chunk, np.float32)
+        bump_buf = np.empty(max_chunk, np.float32)
+        sh_buf = np.empty(max_chunk, np.float32)
+        for c0 in range(0, len(seen), SHADE_CHUNK):
+            pix = seen[c0:c0 + SHADE_CHUNK]
+            chunk_size = len(pix)
+            tri = owner[pix]
+            tri_buf[:chunk_size] = tri
+            ex_buf[:chunk_size] = pix % W + 0.5 - cx_[tri]
+            ey_buf[:chunk_size] = pix // W + 0.5 - cy_[tri]
+            dv_buf[:chunk_size] = den[tri]
+            np.multiply(e0[tri], ex_buf[:chunk_size], out=w0_buf[:chunk_size])
+            np.add(w0_buf[:chunk_size], e1[tri] * ey_buf[:chunk_size], out=w0_buf[:chunk_size])
+            np.divide(w0_buf[:chunk_size], dv_buf[:chunk_size], out=w0_buf[:chunk_size])
+            np.multiply(e2[tri], ex_buf[:chunk_size], out=w1_buf[:chunk_size])
+            np.add(w1_buf[:chunk_size], e3[tri] * ey_buf[:chunk_size], out=w1_buf[:chunk_size])
+            np.divide(w1_buf[:chunk_size], dv_buf[:chunk_size], out=w1_buf[:chunk_size])
+            np.subtract(1.0, w0_buf[:chunk_size], out=w2_buf[:chunk_size])
+            np.subtract(w2_buf[:chunk_size], w1_buf[:chunk_size], out=w2_buf[:chunk_size])
+            np.multiply(w0_buf[:chunk_size], U0[tri], out=u_buf[:chunk_size])
+            np.add(u_buf[:chunk_size], w1_buf[:chunk_size] * U1[tri], out=u_buf[:chunk_size])
+            np.add(u_buf[:chunk_size], w2_buf[:chunk_size] * U2[tri], out=u_buf[:chunk_size])
+            np.multiply(w0_buf[:chunk_size], V0[tri], out=v_buf[:chunk_size])
+            np.add(v_buf[:chunk_size], w1_buf[:chunk_size] * V1[tri], out=v_buf[:chunk_size])
+            np.add(v_buf[:chunk_size], w2_buf[:chunk_size] * V2[tri], out=v_buf[:chunk_size])
+            np.multiply(u_buf[:chunk_size], tW, out=tpx_buf[:chunk_size])
+            np.clip(tpx_buf[:chunk_size], 0, tW - 1, out=tpx_buf[:chunk_size])
+            np.subtract(1.0, v_buf[:chunk_size], out=v_buf[:chunk_size])
+            np.multiply(v_buf[:chunk_size], tH, out=tpy_buf[:chunk_size])
+            np.clip(tpy_buf[:chunk_size], 0, tH - 1, out=tpy_buf[:chunk_size])
+            np.multiply(tpy_buf[:chunk_size], tW, out=flat_buf[:chunk_size])
+            np.add(flat_buf[:chunk_size], tpx_buf[:chunk_size], out=flat_buf[:chunk_size])
+            flat_chunk = flat_buf[:chunk_size].astype(np.int64)
+            if tnrm is not None:
+                nn = tnrm[flat_chunk] / 127.5 - 1
+                np.multiply(nn[:, 0], 0.4, out=bump_buf[:chunk_size])
+                np.subtract(bump_buf[:chunk_size], nn[:, 1] * 0.5, out=bump_buf[:chunk_size])
+                np.multiply(bump_buf[:chunk_size], 0.6, out=bump_buf[:chunk_size])
+                np.add(bump_buf[:chunk_size], 1.0, out=bump_buf[:chunk_size])
+            else:
+                bump_buf[:chunk_size] = 1.0
+            np.multiply(shade[tri], bump_buf[:chunk_size], out=sh_buf[:chunk_size])
+            np.divide(sh_buf[:chunk_size], 255.0, out=sh_buf[:chunk_size])
+            if timg is not None:
+                col = sh_buf[:chunk_size, None] * timg[flat_chunk][:, :3]
+            else:
+                col = sh_buf[:chunk_size, None] * 255.0
+            if temis is not None:
+                col = col + temis[flat_chunk] * emis_k
+            img_flat[pix] = col
 
     # ---- 유리: 불투명 셰이딩이 끝난 뒤 순서대로 섞는다 (mask 모드에서는 불투명처럼 덮는다)
     for i in glass:

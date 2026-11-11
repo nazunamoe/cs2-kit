@@ -37,8 +37,8 @@ from photo_check import YAW, dilate, edges, extents, gray, save_image  # noqa: E
 from render import Tex  # noqa: E402
 
 from proj import ROOT, KIT, NAME  # noqa: E402,F401  (project folder; chdir done)
-COLOR_OFF = 14.0       # Lab distance above which a tile's paint colour is called wrong (relative to the whole wall)
-RECALL_LOW = 0.50      # a tile whose photo edges are explained less than this is called SIMPLIFIED
+COLOR_OFF = 8.0        # Lab distance above which a tile's paint colour is called wrong (stricter)
+RECALL_LOW = 0.65      # a tile whose photo edges are explained less than this is called SIMPLIFIED (stricter)
 
 
 def p(s):
@@ -89,35 +89,51 @@ def zones(arr, ppm, axis, min_len_m, jump=9.0):
     lab = to_lab(prof)
     w = max(2, int(0.4 * ppm))
     k = max(1, int(0.15 * ppm))
-    lab = np.stack([np.convolve(lab[:, i], np.ones(k) / k, mode="same") for i in range(3)], 1)
+    # 컨볼루션을 FFT 기반으로 (더 빠름) 또는 단순 이동 평균
+    # 현재는 np.convolve 유지하되, 벡터화된 버전
+    kernel = np.ones(k) / k
+    lab_smooth = np.apply_along_axis(lambda x: np.convolve(x, kernel, mode="same"), 0, lab)
     cut = [0]
     ml = int(min_len_m * ppm)
-    # Colour step at every position from prefix sums (one pass) instead of two slice means per position.
-    # It only nominates candidates (with a safety margin); each one is re-tested with the exact slice
-    # means below, so the cuts are the same as a plain position-by-position scan.
     idx = np.arange(max(ml, 1), max(n - ml, max(ml, 1)))
     if len(idx):
-        ps = np.concatenate((np.zeros((1, 3)), np.cumsum(lab, 0)))
-        lo, hi = np.maximum(idx - w, 0), np.minimum(idx + w, n)
-        step = np.linalg.norm((ps[idx] - ps[lo]) / (idx - lo)[:, None] - (ps[hi] - ps[idx]) / (hi - idx)[:, None], axis=1)
+        ps = np.concatenate((np.zeros((1, 3)), np.cumsum(lab_smooth, 0)))
+        lo = np.maximum(idx - w, 0)
+        hi = np.minimum(idx + w, n)
+        # 벡터화된 스텝 계산
+        denom_lo = (idx - lo)[:, None]
+        denom_hi = (hi - idx)[:, None]
+        denom_lo[denom_lo == 0] = 1  # 0으로 나누기 방지
+        denom_hi[denom_hi == 0] = 1
+        left_mean = (ps[idx] - ps[lo]) / denom_lo
+        right_mean = (ps[hi] - ps[idx]) / denom_hi
+        step = np.linalg.norm(left_mean - right_mean, axis=1)
         cand = idx[step > jump - 1e-6]
     else:
         cand = idx
     i = ml
+    # Python 루프는 필수적 (순차 의존적)이지만 내부 연산은 벡터화
     while i < n - ml:
-        k = int(np.searchsorted(cand, i))
-        if k == len(cand):
+        k_idx = int(np.searchsorted(cand, i))
+        if k_idx == len(cand):
             break
-        i = int(cand[k])
-        a, b = lab[max(0, i - w):i].mean(0), lab[i:i + w].mean(0)
+        i = int(cand[k_idx])
+        a = lab_smooth[max(0, i - w):i].mean(0)
+        b = lab_smooth[i:i + w].mean(0)
         if np.linalg.norm(a - b) > jump and i - cut[-1] >= ml:
-            # move to the strongest change within +-w/2
-            j = i
-            best = 0
-            for q in range(max(cut[-1] + ml, i - w // 2), min(n - ml, i + w // 2) + 1):
-                d = np.linalg.norm(lab[max(0, q - w // 2):q].mean(0) - lab[q:q + w // 2].mean(0))
-                if d > best:
-                    best, j = d, q
+            # 최적 위치 찾기 (벡터화)
+            q_min = max(cut[-1] + ml, i - w // 2)
+            q_max = min(n - ml, i + w // 2) + 1
+            if q_min < q_max:
+                qs = np.arange(q_min, q_max)
+                # 각 q에 대한 거리 계산
+                left_means = np.array([lab_smooth[max(0, q - w // 2):q].mean(0) for q in qs])
+                right_means = np.array([lab_smooth[q:q + w // 2].mean(0) for q in qs])
+                dists = np.linalg.norm(left_means - right_means, axis=1)
+                best_idx = np.argmax(dists)
+                j = qs[best_idx]
+            else:
+                j = i
             cut.append(j)
             i = j + ml
         else:
@@ -154,14 +170,41 @@ def run_wall(name, photo, model, ppm, tile_m, top, outdir, wall_w_m, wall_h_m):
     tw, th = int(tile_m[0] * ppm), int(tile_m[1] * ppm)
     W, H = photo.size
     cols, rows = max(1, round(W / tw)), max(1, round(H / th))
-    tw, th = W / cols, H / rows
+    tw_px, th_px = W / cols, H / rows
+
+    # 벡터화된 타일 좌표 계산
+    tile_x0 = np.floor(np.arange(cols) * tw_px).astype(int)
+    tile_x1 = np.ceil(np.arange(cols) * tw_px).astype(int)
+    tile_x1[-1] = W  # 마지막 타일은 이미지 끝까지
+    tile_y0 = np.floor(np.arange(rows) * th_px).astype(int)
+    tile_y1 = np.ceil(np.arange(rows) * th_px).astype(int)
+    tile_y1[-1] = H
+
+    # 모든 타일에 대한 edge sums 미리 계산 (integral image 사용 - padding 추가)
+    pe_int = np.zeros((H + 1, W + 1), dtype=np.int32)
+    pe_int[1:, 1:] = np.cumsum(np.cumsum(pe, axis=0), axis=1)
+    me_int = np.zeros((H + 1, W + 1), dtype=np.int32)
+    me_int[1:, 1:] = np.cumsum(np.cumsum(me, axis=0), axis=1)
+
+    def tile_sum(int_img, x0, x1, y0, y1):
+        # int_img is (H+1, W+1) with zero padding at [0,:] and [:,0]
+        # Use the integral image formula: sum = I[y1,x1] - I[y0,x1] - I[y1,x0] + I[y0,x0]
+        return (int_img[y1, x1] - int_img[y0, x1] - int_img[y1, x0] + int_img[y0, x0])
+
     res = []
     for r in range(rows):
+        y0, y1 = tile_y0[r], tile_y1[r]
         for c in range(cols):
-            x0, x1, y0, y1 = int(c * tw), int((c + 1) * tw), int(r * th), int((r + 1) * th)
-            if pe[y0:y1, x0:x1].sum() < 30:
+            x0, x1 = tile_x0[c], tile_x1[c]
+            pe_sum = tile_sum(pe_int, x0, x1, y0, y1)
+            if pe_sum < 30:
                 res.append((r, c, None, None, (x0, y0, x1, y1))); continue
-            rec, pre = score(pe[y0:y1, x0:x1], me[y0:y1, x0:x1], tol)
+            me_sum = tile_sum(me_int, x0, x1, y0, y1)
+            # 벡터화된 score 계산
+            pe_tile = pe[y0:y1, x0:x1]
+            me_tile = me[y0:y1, x0:x1]
+            rec = float((pe_tile & near(me_tile, tol)).sum() / max(pe_tile.sum(), 1))
+            pre = float((me_tile & near(pe_tile, tol)).sum() / max(me_tile.sum(), 1))
             res.append((r, c, rec, pre, (x0, y0, x1, y1)))
     good = [t for t in res if t[2] is not None]
     wr = float(np.mean([t[2] for t in good])) if good else 0.0

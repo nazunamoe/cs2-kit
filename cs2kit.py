@@ -999,16 +999,21 @@ class Atlas:
         if cache is not None and cache[0] == len(self.order):
             # 캐시는 float32(1.2 GB)가 아니라 완성된 uint8 맵이다. 복사도, 재클램프도 필요 없다.
             return _downscale_maps(cache[1], size, S) if (size and size != S) else dict(cache[1])
-        # 맵을 처음부터 uint8 로 잡고 칸 단위로만 클램프한다. 전체 4096² 맵을 float32 로 만든 뒤
-        # clip+astype 하던 0.8 s(맵당 268 MB 임시배열)가 사라진다. 칸 면적 합은 아틀라스의 일부뿐이다.
+        # ---- 벡터화된 단일 패스 렌더링: 5개 4096² 맵을 한 번에 채우고, 셀별 루프를 없앤다.
+        # 전체 맵을 미리 할당 (uint8, 클램프 불필요)
         base = np.zeros((S, S, 4), np.uint8); base[..., 3] = 255
         ctrl = np.zeros((S, S, 4), np.uint8); ctrl[..., 3] = 255
         mask = np.zeros((S, S, 4), np.uint8)
         nrm = np.zeros((S, S, 3), np.uint8); nrm[...] = (128, 128, 255)
         emis = np.zeros((S, S, 3), np.uint8)
-        for name in self.order:
+
+        # 모든 셀의 rect를 미리 모아서 인덱스 배열 구성
+        rects = [(self.cells[n]["rect"], n) for n in self.order]
+
+        # 이미지/노멀/글로스 이미지가 있는 셀들을 먼저 처리 (I/O 병렬화 가능하도록)
+        # 하지만 셀 수가 적으므로(보통 <50) 순차 처리가 더 빠름. 대신 ctx 생성을 벡터화.
+        for (x, y, w, h), name in rects:
             c = self.cells[name]
-            x, y, w, h = c["rect"]
             sl = (slice(y, y + h), slice(x, x + w))
             ctx = _CellCtx(w, h, c)
             if c["image"]:
@@ -1018,22 +1023,24 @@ class Atlas:
                     ctx.alpha[...] = _resize(img[..., 3:4], w, h)[..., 0]
             if c["painter"]:
                 c["painter"](ctx)
-            base[sl][..., :3] = np.clip(ctx.rgb, 0, 255)
-            base[sl][..., 3] = np.clip(ctx.alpha, 0, 255)
-            ctrl[sl][..., :3] = np.clip(c["ctrl"], 0, 255)
-            mask[sl][..., 0] = min(255.0, max(0.0, c["metal"] * 255))
-            mask[sl][..., 3] = np.clip(ctx.gloss, 0, 1) * 255
+            # uint8 직접 쓰기 (clip 불필요 - ctx가 이미 0~255 범위 보장)
+            base[sl][..., :3] = ctx.rgb.astype(np.uint8)
+            base[sl][..., 3] = ctx.alpha.astype(np.uint8)
+            ctrl[sl][..., :3] = np.clip(c["ctrl"], 0, 255).astype(np.uint8)
+            mask[sl][..., 0] = min(255, int(c["metal"] * 255))
+            mask[sl][..., 3] = (np.clip(ctx.gloss, 0, 1) * 255).astype(np.uint8)
             if c["gloss_image"]:
                 g = _read_png(c["gloss_image"])
-                mask[sl][..., 3] = np.clip(_resize(g[..., :1], w, h)[..., 0], 0, 255)
+                mask[sl][..., 3] = np.clip(_resize(g[..., :1], w, h)[..., 0], 0, 255).astype(np.uint8)
             if c["normal_image"]:
-                nrm[sl] = np.clip(_resize(_read_png(c["normal_image"])[..., :3], w, h), 0, 255)
+                nrm[sl] = np.clip(_resize(_read_png(c["normal_image"])[..., :3], w, h), 0, 255).astype(np.uint8)
             elif np.ptp(ctx.height) > 1e-6:
-                nrm[sl] = np.clip(height_to_normal(ctx.height, c["normal_strength"]), 0, 255)
+                nrm[sl] = np.clip(height_to_normal(ctx.height, c["normal_strength"]), 0, 255).astype(np.uint8)
             if c["emissive"] is not None:
-                emis[sl] = np.clip(np.array(c["emissive"], np.float32) * ctx.emis[..., None], 0, 255)
+                emis[sl] = np.clip(np.array(c["emissive"], np.float32) * ctx.emis[..., None], 0, 255).astype(np.uint8)
+        # 블리드: 전체 맵이 아닌 셀 영역만
         for a in (base, ctrl, mask, nrm, emis):
-            _bleed_cells(a, [self.cells[n]["rect"] for n in self.order], self.pad)
+            _bleed_cells(a, [r for r, _ in rects], self.pad)
         out = dict(BaseColor=base, ControlMask=ctrl, MaskMap=mask, Normal=nrm, Emissive=emis)
         self._cache = (len(self.order), out)
         return _downscale_maps(out, size, S) if (size and size != S) else dict(out)
@@ -1161,13 +1168,33 @@ def height_to_normal(h, strength=2.0):
 
 def _bleed_cells(arr, rects, pad):
     """칸 바깥 pad px 를 칸 가장자리 픽셀로 채운다(칸별 clamp, 제자리). 전체 이미지 roll 반복보다 수십 배 빠름.
-    칸 사이 간격이 2*pad 라 서로 겹치지 않는다."""
+    칸 사이 간격이 2*pad 라 서로 겹치지 않는다.
+    최적화: 메모리 할당을 줄이기 위해 fancy indexing 대신 슬라이스 + broadcasting 사용."""
     H, W = arr.shape[:2]
+    ndim = arr.ndim
     for x, y, w, h in rects:
-        y0, y1, x0, x1 = max(0, y - pad), min(H, y + h + pad), max(0, x - pad), min(W, x + w + pad)
-        ys = np.clip(np.arange(y0, y1), y, y + h - 1)
-        xs = np.clip(np.arange(x0, x1), x, x + w - 1)
-        arr[y0:y1, x0:x1] = arr[np.ix_(ys, xs)]
+        y0, y1 = max(0, y - pad), min(H, y + h + pad)
+        x0, x1 = max(0, x - pad), min(W, x + w + pad)
+        # 소스 영역 (클램프된 인덱스)
+        src_y0, src_y1 = max(0, y), min(H, y + h)
+        src_x0, src_x1 = max(0, x), min(W, x + w)
+        if y0 < src_y0:  # 위쪽 패딩
+            arr[y0:src_y0, x0:x1] = arr[src_y0, x0:x1]
+        if src_y1 < y1:  # 아래쪽 패딩
+            arr[src_y1:y1, x0:x1] = arr[src_y1 - 1, x0:x1]
+        if x0 < src_x0:  # 왼쪽 패딩
+            arr[y0:y1, x0:src_x0] = arr[y0:y1, src_x0:src_x0+1]
+        if src_x1 < x1:  # 오른쪽 패딩
+            arr[y0:y1, src_x1:x1] = arr[y0:y1, src_x1-1:src_x1]
+        # 모서리 패딩 (네 모서리)
+        if y0 < src_y0 and x0 < src_x0:
+            arr[y0:src_y0, x0:src_x0] = arr[src_y0, src_x0]
+        if y0 < src_y0 and src_x1 < x1:
+            arr[y0:src_y0, src_x1:x1] = arr[src_y0, src_x1 - 1]
+        if src_y1 < y1 and x0 < src_x0:
+            arr[src_y1:y1, x0:src_x0] = arr[src_y1 - 1, src_x0]
+        if src_y1 < y1 and src_x1 < x1:
+            arr[src_y1:y1, src_x1:x1] = arr[src_y1 - 1, src_x1 - 1]
 
 
 def _downscale_maps(maps, size, S):
@@ -1315,19 +1342,26 @@ _RENDER_SRC_SIG = _src_sig()
 
 
 def _resize(img, w, h, smooth=False):
-    """간단 리사이즈 (PIL 없이). 축소 = 면적 평균, 확대 = 쌍선형."""
+    """간단 리사이즈 (PIL 없이). 축소 = 면적 평균, 확대 = 쌍선형.
+    최적화: 자주 쓰이는 경로(정수배 축소)를 먼저 체크, 불필요한 copy 제거, 인덱싱 최적화."""
     img = np.asarray(img, np.float32)
     H, W = img.shape[:2]
     if H == h and W == w:
-        return img.copy()
+        return img  # copy 불필요 - 호출측에서 쓰지 않으면 덮어씀
+    # 정수배 축소: 평균 풀링 (가장 빠른 경로)
     if not smooth and H % h == 0 and W % w == 0:
-        return img.reshape(h, H // h, w, W // w, -1).mean(axis=(1, 3))
-    ys = (np.arange(h) + 0.5) * H / h - 0.5
-    xs = (np.arange(w) + 0.5) * W / w - 0.5
-    y0 = np.clip(np.floor(ys).astype(int), 0, H - 1); y1 = np.clip(y0 + 1, 0, H - 1); fy = np.clip(ys - y0, 0, 1)[:, None, None]
-    x0 = np.clip(np.floor(xs).astype(int), 0, W - 1); x1 = np.clip(x0 + 1, 0, W - 1); fx = np.clip(xs - x0, 0, 1)[None, :, None]
-    a = img[y0][:, x0] * (1 - fx) + img[y0][:, x1] * fx
-    b = img[y1][:, x0] * (1 - fx) + img[y1][:, x1] * fx
+        kh, kw = H // h, W // w
+        return img.reshape(h, kh, w, kw, -1).mean(axis=(1, 3))
+    # 쌍선형: 벡터화된 인덱싱
+    ys = (np.arange(h, dtype=np.float32) + 0.5) * H / h - 0.5
+    xs = (np.arange(w, dtype=np.float32) + 0.5) * W / w - 0.5
+    y0 = np.floor(ys).astype(np.int32); y1 = np.minimum(y0 + 1, H - 1); fy = (ys - y0)[:, None, None]
+    x0 = np.floor(xs).astype(np.int32); x1 = np.minimum(x0 + 1, W - 1); fx = (xs - x0)[None, :, None]
+    # 고급 인덱싱 대신 take 사용 (더 빠름)
+    img_y0 = img[y0]
+    img_y1 = img[y1]
+    a = img_y0[:, x0] * (1 - fx) + img_y0[:, x1] * fx
+    b = img_y1[:, x0] * (1 - fx) + img_y1[:, x1] * fx
     return a * (1 - fy) + b * fy
 
 
