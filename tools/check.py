@@ -54,14 +54,6 @@ def normals(Q):
     return n / np.maximum(a, 1e-12)[:, None], a / 2
 
 
-def _clip_vectorized(poly_arr, a, b):
-    """여러 폴리곤을 한 번에 클리핑 (배치 처리).
-    poly_arr: (n, m, 2) - 각 폴리곤은 (m, 2) 크기, 패딩된 직사각형 형태.
-    반환: (n, m_out, 2) - 클리핑된 폴리곤들 (각각 다른 크기 가능하므로 리스트 반환)"""
-    # 이 함수는 벡터화하기 복잡하므로, 대신 Python 루프를 최적화
-    pass
-
-
 def _clip(poly, a, b):
     out = []
     side = lambda p: (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
@@ -129,13 +121,12 @@ def coplanar(mesh, min_area=1e-3):
 
 
 def _coplanar_group(Q, idx, u, v, n, min_area, bad):
-    """한 평면 위의 면들(idx)에서 겹치는 쌍을 bad 에 추가.
-    최적화: 경계 상자 테스트를 벡터화하고, 실제 클리핑이 필요한 쌍만 선별."""
+    """한 평면 위의 면들(idx)에서 겹치는 쌍을 bad 에 추가."""
     pts = Q[idx]                                              # (m,4,3)
     px = pts[..., 0] * u[0] + pts[..., 1] * u[1] + pts[..., 2] * u[2]
     py = pts[..., 0] * v[0] + pts[..., 1] * v[1] + pts[..., 2] * v[2]
-    step = np.linalg.norm(pts - np.roll(pts, 1, axis=1), axis=2)
-    simple = (step[:, 1:] > 1e-9).all(1) & (step[:, 0] >= 1e-9)
+    step = np.linalg.norm(pts - np.roll(pts, 1, axis=1), axis=2)      # 이전 꼭짓점까지 거리 ([:,0] = 0번-3번)
+    simple = (step[:, 1:] > 1e-9).all(1) & (step[:, 0] >= 1e-9)        # 겹친 점이 없는 사각형
     t = px * np.roll(py, -1, axis=1) - np.roll(px, -1, axis=1) * py
     flip = (((t[:, 0] + t[:, 1]) + t[:, 2]) + t[:, 3]) <= 0
     bb = np.stack((px.min(1), py.min(1), px.max(1), py.max(1)), 1)
@@ -146,56 +137,38 @@ def _coplanar_group(Q, idx, u, v, n, min_area, bad):
             if simple[i]:
                 P = list(zip(px[i].tolist(), py[i].tolist()))
                 polys[i] = P[::-1] if flip[i] else P
-            else:
+            else:                                             # 삼각형 등: 겹친 점을 뺀 뒤 방향 맞춤
                 polys[i] = _ccw([(float(q @ u), float(q @ v)) for q in _uniq(Q[idx[i]])])
         return polys[i]
 
-    # 벡터화된 경계 상자 중첩 테스트
-    x0s = bb[:, 0]
-    x1s = bb[:, 2]
-    y0s = bb[:, 1]
-    y1s = bb[:, 3]
-
-    order = np.argsort(x0s, kind="stable")
-    x0s_ord = x0s[order]
-    x1s_ord = x1s[order]
-    y0s_ord = y0s[order]
-    y1s_ord = y1s[order]
-
-    # 각 i에 대해 x0[j] < x1[i] 인 j의 범위 찾기 (이진 검색)
-    end_idx = np.searchsorted(x0s_ord, x1s_ord, side="left")
-
-    limit = 1 << 22
-    for oi, i in enumerate(order):
-        # x-축 겹침: j > oi 이면서 x0[j] < x1[i]
-        start = oi + 1
-        end = end_idx[oi]
-        if start >= end:
-            continue
-
-        # y-축 겹침 추가 체크 (벡터화)
-        y0_cand = y0s_ord[start:end]
-        y1_cand = y1s_ord[start:end]
-        hit = (y0s[oi] < y1_cand) & (y0_cand < y1s[oi])
-        if not hit.any():
-            continue
-
-        j_indices = order[start:end][hit]
-        if not len(j_indices):
-            continue
-
-        # 후보 쌍들에 대해 실제 클리핑 수행
-        Pi = poly(i)
-        for j in j_indices:
-            Pj = poly(j)
-            inter = Pi
-            for e in range(len(Pj)):
-                inter = _clip(inter, Pj[e], Pj[(e + 1) % len(Pj)])
-                if not inter:
-                    break
-            if inter and _area(inter) > min_area:
-                bad.append(dict(faces=(int(idx[i]), int(idx[j])), area=round(_area(inter), 4),
-                                at=np.round(Q[idx[i]].mean(0), 2).tolist(), normal=list(n)))
+    order = np.argsort(bb[:, 0])                            # 기본 정렬: 동률 순서가 예시의 (i, j) 를 정한다
+    x0s = bb[order, 0]
+    end = np.searchsorted(x0s, bb[order, 2], side="left")     # x0[j] < x1[i] 인 j 의 끝
+    count = np.maximum(end - (np.arange(len(order)) + 1), 0)
+    limit = 1 << 22                                           # 한 번에 펼치는 후보 쌍 수
+    a0 = 0
+    while a0 < len(order):
+        a1 = a0 + 1
+        tot = int(count[a0])
+        while a1 < len(order) and tot + int(count[a1]) <= limit:
+            tot += int(count[a1]); a1 += 1
+        if tot:
+            cnt = count[a0:a1]
+            ia = np.repeat(np.arange(a0, a1), cnt)
+            ib = ia + 1 + (np.arange(tot) - np.repeat(np.cumsum(cnt) - cnt, cnt))
+            i_, j_ = order[ia], order[ib]
+            hit = (bb[i_, 1] < bb[j_, 3]) & (bb[j_, 1] < bb[i_, 3])
+            for i, j in zip(i_[hit].tolist(), j_[hit].tolist()):
+                inter = poly(i)
+                Pj = poly(j)
+                for e in range(len(Pj)):
+                    inter = _clip(inter, Pj[e], Pj[(e + 1) % len(Pj)])
+                    if not inter:
+                        break
+                if inter and _area(inter) > min_area:
+                    bad.append(dict(faces=(int(idx[i]), int(idx[j])), area=round(_area(inter), 4),
+                                    at=np.round(Q[idx[i]].mean(0), 2).tolist(), normal=list(n)))
+        a0 = a1
 
 
 def _uniq(q):
