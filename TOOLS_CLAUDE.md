@@ -125,6 +125,15 @@ python tools/run_blender.py G -- --out output
 
 `--obj` skips FBX for fast iteration. Without `--obj`, the bpy module is used when found, otherwise Blender; `RUN_BLENDER_ENGINE=exe` forces the app. `pip install bpy` in a matching venv (Blender 5.0 → Python 3.11) writes the same FBX headlessly, with no Blender install; `tools/run_blender.py --fbx2obj` can also read FBX back without Blender. The LOD check prefers the Blender app when present (Workbench renders ~5x faster there) and otherwise uses bpy; `LOD_ENGINE=exe|py` forces one. `compare.py diff --box` fails on mesh changes outside the box; window UVs are compared by position because atlas allocation can reorder them. `--json` writes the same diff as structured data (mesh counts, out-of-box count, changed texture regions) and prints a `MESHDIFF PASS|FAIL` line; `agent.py fix` runs the same diff after its final cycle.
 
+## Game road side (rotated game copy)
+
+```bash
+python tools/game_flip.py projects/P/output/A [projects/P/output/B ...] --out projects/P/output_game --front back
+python tools/game_flip.py projects/P/output/A --out projects/P/output_game --rot 90
+```
+
+CS2 takes the road side from the model's -Y face, and rotating a building while placing it rotates the lot too, so the road edge never changes in game. `game_flip.py` writes a rotated copy for the game instead; the generator and `output/` stay untouched and every check keeps running in generator coordinates. `--front front|back|left|right` names the generator face that should face the road; `--rot` is the same in degrees counter-clockwise from above (90 = left, 180 = back, 270 = right). It reads the asset's saved `.blend` (run the final gate first; a `.blend` older than the FBX is refused), bakes the rotation into the mesh data (a rotation, never a mirror), re-exports with the same FBX settings as `cs2kit._bl_export`, copies the PNG maps and tags `manifest.json` with `game_flip`. At 90/270 the footprint swaps, so the lot is recomputed with `cs2kit.asset_name` (default `front_yard` 6 m; an explicit generator `lot=` is not carried over) and the asset, mesh and PNG names change with it. In the same Blender run it re-imports old and new FBX and checks vertex positions, triangle counts, sizes and the mesh name inside each FBX, then prints `FLIP OK|FAIL` and a final `GAME_FLIP PASS|FAIL`. Needs the Blender app (`tools/blender_path.txt`). Run `lod_check` on the copy folder before shipping; it writes to the same `previews/lod_check/<asset>/` as the original when the name is unchanged. A 180° copy keeps the original name unless `--suffix X` is given (`<base>X_L1_WxD`, letters/digits only). Use a suffix whenever the original was already imported: with the same name the game reuses the earlier import and the road side does not change.
+
 ## Preset/socket mode (v1, optional)
 
 Use only for a generator explicitly written for this API:

@@ -2337,6 +2337,8 @@ def build_part(A, T, unit0=0):
                 if not flush and (h[3] - h[2] < 0.6 or (isinstance(h[5], tuple) and len(h[5]) > 2 and h[5][2] == "louver")):
                     # short wide opening = AC-unit room louver (or kind (sill, head, "louver")): real blades, dark backing
                     reveal(main, w, h, "frame")
+                    # dark backing at the reveal bottom: rays between the blades otherwise reach the interior (lod_check HOLE)
+                    main.rect(K.face_pts(w["axis"], w["c"] - w["s"] * WIN_IN, w["s"], h[0], h[1], h[2], h[3]), "char")
                     ledge(main, w, h[0] - 0.05, h[1] + 0.05, h[2], out=0.08, h=0.22)
                     zb_ = h[2] + 0.04
                     while zb_ + 0.03 < h[3]:
@@ -2356,6 +2358,9 @@ def build_part(A, T, unit0=0):
                     # handrail + bottom rail as real boxes
                     o_, zr0 = dep * 0.5, h[2] + 0.02
                     hr = min(1.0, h[3] - h[2] - 0.3)
+                    # dark backing at the glass plane from the sill to the glass bottom: without it lod_check sees into the
+                    # building through the alpha pickets and the 3 cm gap above the handrail
+                    main.rect(K.face_pts(w["axis"], w["c"] - w["s"] * dep, w["s"], h[0], h[1], h[2], h[2] + hr + 0.1), "char")
                     main.rect(K.face_pts(w["axis"], w["c"] - w["s"] * o_, w["s"], h[0] + 0.02, h[1] - 0.02, zr0 + 0.06, zr0 + hr), "srail")
                     for zz0, zz1 in ((zr0, zr0 + 0.06), (zr0 + hr, zr0 + hr + 0.05)):
                         K.axbox(main, w["axis"], w["c"] - w["s"] * (o_ + 0.03), w["s"], h[0] + 0.01, h[1] - 0.01, 0.0, 0.05, zz0, zz1, "srailbar")
