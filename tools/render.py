@@ -337,13 +337,14 @@ _CTX = {}
 
 def _view_job(arg):
     """한 뷰를 그린다 (프로세스마다 에셋·텍스처를 한 번만 읽어 재사용)."""
-    (v, yaw, pitch, title), (path, size, zoom, box, night, label, mode) = arg
+    (v, yaw, pitch, title), (path, size, zoom, box, night, label, mode, transparent) = arg
     if path not in _CTX:
         asset, M, texdir, man = load_asset(path)
         _CTX[path] = dict(asset=asset, M=M, texdir=texdir, man=man, tex={})
     c = _CTX[path]
     if v == "atlas":
-        return atlas_view(c["texdir"], c["asset"], c["man"], size)
+        im = atlas_view(c["texdir"], c["asset"], c["man"], size)
+        return im.convert("RGBA") if transparent else im
     M = c["M"]
     lod2 = v == "lod2"
     if lod2 not in c["tex"]:
@@ -355,6 +356,12 @@ def _view_job(arg):
         parts = [(M.get("lod2"), "s"), (M.get("lod2_win"), "window")]
     else:
         parts = [(M.get("main"), "s"), (M.get("win"), "window"), (M.get("gls"), "glass")]
+    if transparent:                                    # colour + silhouette (no antialiasing; supersample with --size and downscale)
+        im = render(parts, tex, yaw, pitch, size, "", zoom, box, night, False)
+        sil = render(parts, tex, yaw, pitch, size, "", zoom, box, night, False, mask=True).convert("L")
+        im = im.convert("RGBA")
+        im.putalpha(sil.point(lambda x: 255 if x > 127 else 0))
+        return im
     return render(parts, tex, yaw, pitch, size, title, zoom, box, night, label)
 
 
@@ -371,7 +378,7 @@ def render_cache_key(args):
     """Hash render inputs; texture-only changes invalidate, identical rerenders hit."""
     h = hashlib.sha256()
     for value in (str(RENDER_CACHE_VERSION), args.views, args.size, args.zoom or "", args.box or "", args.mode,
-                  str(args.night), str(args.nolabel), os.path.abspath(args.path)):
+                  str(args.night), str(args.nolabel), str(args.transparent), os.path.abspath(args.path)):
         h.update(value.encode("utf-8"))
     path = os.path.abspath(args.path)
     asset_dir = path if os.path.isdir(path) else os.path.dirname(path)
@@ -397,6 +404,7 @@ def main():
     ap.add_argument("--night", action="store_true")
     ap.add_argument("--nolabel", action="store_true")
     ap.add_argument("--no-cache", action="store_true")
+    ap.add_argument("--transparent", action="store_true", help="RGBA PNG with a transparent background (building silhouette); the label is dropped")
     a = ap.parse_args()
     cache_dir = os.path.join(proj.ROOT, "previews", "_render_cache")
     cache_file = None
@@ -412,7 +420,12 @@ def main():
             cache_file = None
     asset, M, texdir, man = load_asset(a.path)
     _CTX[a.path] = dict(asset=asset, M=M, texdir=texdir, man=man, tex={})    # 뷰 작업이 다시 읽지 않게
-    size = tuple(int(s) for s in a.size.lower().split("x"))
+    try:
+        size = tuple(int(s) for s in a.size.lower().split("x"))
+        if len(size) != 2 or min(size) < 16:
+            raise ValueError
+    except ValueError:
+        raise SystemExit(f"--size must be WIDTHxHEIGHT in pixels, e.g. 900x700 (got '{a.size}')")
     zoom = tuple(float(s) for s in a.zoom.split(",")) if a.zoom else None
     box = tuple(float(s) for s in a.box.split(",")) if a.box else None
     jobs = []
@@ -431,7 +444,7 @@ def main():
                     pitch = float(tok[5:])
         title = f"{v}  yaw {yaw:g} pitch {pitch:g}" + (f"  zoom {a.zoom}" if zoom else "")
         jobs.append((v, yaw, pitch, title))
-    common = (a.path, size, zoom, box, a.night, not a.nolabel, a.mode)
+    common = (a.path, size, zoom, box, a.night, not a.nolabel, a.mode, a.transparent)
     ims = None
     n_real = sum(1 for j in jobs if j[1] is not None)
     if n_real >= 2 and os.environ.get("RENDER_SERIAL") != "1":
@@ -449,14 +462,14 @@ def main():
     if ims is None:
         ims = [_view_job((j, common)) for j in jobs]
     if a.photo:
-        ph = Image.open(a.photo).convert("RGB")
+        ph = Image.open(a.photo).convert("RGBA" if a.transparent else "RGB")
         ph = ph.resize((int(ph.size[0] * size[1] / ph.size[1]), size[1]), Image.LANCZOS)
         ims.insert(0, ph)
     Wt = sum(im.size[0] for im in ims); Ht = max(im.size[1] for im in ims)
-    sheet = Image.new("RGB", (Wt, Ht), "white")
+    sheet = Image.new("RGBA", (Wt, Ht), (0, 0, 0, 0)) if a.transparent else Image.new("RGB", (Wt, Ht), "white")
     x = 0
     for im in ims:
-        sheet.paste(im, (x, 0)); x += im.size[0]
+        sheet.paste(im, (x, 0)); x += im.size[0]          # RGBA onto RGBA replaces the pixels, so the alpha stays
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     sheet.save(a.out)
     if cache_file:
