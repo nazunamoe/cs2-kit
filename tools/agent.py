@@ -18,6 +18,23 @@ from agent_actions import classify_gate  # noqa: E402
 PY = sys.executable
 STATE = os.path.join(ROOT, "work", "agent_state.json")
 OBSERVATIONS = os.path.join(ROOT, "work", "observations.json")
+ASSET_STATES = os.path.join(ROOT, "work", "assets")   # one mirror of agent_state.json per asset (the main file stays "last run")
+
+
+def asset_mirror(asset):
+    return os.path.join(ASSET_STATES, "".join(c if c.isalnum() or c in "-_." else "_" for c in asset) + ".json")
+
+
+def find_mirror(query):
+    """Exact asset name, else a unique case-insensitive substring of the mirrored assets."""
+    names = sorted(f[:-5] for f in os.listdir(ASSET_STATES)) if os.path.isdir(ASSET_STATES) else []
+    if query in names:
+        return query
+    hit = [n for n in names if query.lower() in n.lower()]
+    if len(hit) == 1:
+        return hit[0]
+    raise SystemExit(f"--asset '{query}': " + ("ambiguous: " + ", ".join(hit) if hit else
+                     "no saved state (run a cycle for that asset first; known: " + (", ".join(names) or "none") + ")"))
 
 
 def read_json(path, default=None):
@@ -44,8 +61,8 @@ def digest(path):
     return h.hexdigest()
 
 
-def run(cmd):
-    r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
+def run(cmd, env=None):
+    r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
@@ -150,7 +167,7 @@ def project_lock():
             pass
 
 
-def review_command(gate):
+def review_command(gate, pin_asset=False):
     artifacts = []
     preview = (gate.get("artifacts") or {}).get("preview")
     if preview:
@@ -165,7 +182,10 @@ def review_command(gate):
             artifacts.append(os.path.join("previews", "tiles", parts[1] + "_map.png"))
     artifacts = list(dict.fromkeys(path.replace(os.sep, "/") for path in artifacts))
     cmd = f"python tools/agent.py review --project {NAME} --status PASS --note \"reviewed current artifacts\""
-    return cmd + "".join(f" --artifact \"{path}\"" for path in artifacts)
+    cmd += "".join(f" --artifact \"{path}\"" for path in artifacts)
+    if pin_asset and gate.get("asset"):                    # several assets share the generator: review this one, not the last run
+        cmd += f" --asset {gate['asset']}"
+    return cmd
 
 
 def builder_brief(gate, status):
@@ -225,6 +245,9 @@ def save_state(state):
     state["project"] = NAME
     state["updated_at"] = datetime.datetime.now().isoformat(timespec="seconds")
     write_json(STATE, state)
+    asset = (state.get("last_gate") or {}).get("asset")
+    if asset:
+        write_json(asset_mirror(asset), state)
     update_status(state)
 
 
@@ -241,117 +264,167 @@ def emit(data, as_json, code=0):
     raise SystemExit(code)
 
 
+def parse_env(items):
+    out = {}
+    for item in items or []:
+        key, sep, value = item.partition("=")
+        if not sep or not key:
+            raise SystemExit(f"--env expects KEY=VALUE (got '{item}')")
+        out[key] = value
+    return out
+
+
+def parse_variants(spec):
+    if not spec:
+        return None, []
+    key, sep, values = spec.partition("=")
+    vals = [v for v in values.split(",") if v]
+    if not sep or not key or not vals:
+        raise SystemExit(f"--variants expects KEY=a,b,c (got '{spec}'), e.g. TOWER=L,I,M")
+    return key, vals
+
+
+STATUS_ORDER = ("FAIL", "NEEDS_HUMAN_REVIEW", "INCOMPLETE", "PASS")
+
+
 def normalized_cycle(args):
     require_project()
     generator = os.path.abspath(args.generator)
     if not os.path.isfile(generator):
         raise SystemExit(f"generator not found: {args.generator}")
+    base_env = parse_env(args.env)
+    vkey, vvals = parse_variants(args.variants)
     with project_lock():
-        cmd = [PY, os.path.join(KIT, "tools", "cycle.py"), generator, "--mode", args.mode, "--json"]
-        if args.label:
-            cmd += ["--label", args.label]
-        code, log = run(cmd)
-        os.makedirs(os.path.join(ROOT, "work", "logs"), exist_ok=True)
-        log_path = os.path.join(ROOT, "work", "logs", "last_cycle.log")
-        with open(log_path, "w", encoding="utf-8") as f:
-            f.write(log)
-        gate = None
-        gate_path = None
-        for line in log.splitlines():
-            if line.startswith("[json] "):
-                gate_path = line[7:].strip()
-                gate = read_json(os.path.join(ROOT, gate_path), None)
-        state = read_json(STATE)
-        gen_hash = digest(generator)
-        if state.get("generator_hash") != gen_hash:
-            state["visual_review"] = "NOT_CHECKED"
-        if gate is None:
-            gate = {
-                "status": "FAIL", "project": NAME, "generator": os.path.basename(generator), "mode": args.mode,
-                "checks": {"build": "FAIL"}, "errors": [{"msg": "cycle failed before gate.json; see the raw log"}],
-                "next_action": next_for("FAIL", os.path.basename(generator)),
-            }
-        preview_rel = (gate.get("artifacts") or {}).get("preview")
-        preview_path = os.path.join(ROOT, preview_rel) if preview_rel else None
-        preview_hash = digest(preview_path) if preview_path and os.path.isfile(preview_path) else None
-        if args.mode != "quick" and state.get("reviewed_preview_hash") != preview_hash:
-            state["visual_review"] = "NOT_CHECKED"
-        status = gate.get("status", "FAIL")
-        mismatch_keys = sorted(line.split(":", 1)[0] for line in (gate.get("photo") or {}).get("lines", [])
-                               if line.startswith("PHOTO_MISMATCH"))
-        signature = "\n".join(mismatch_keys)
-        previous_signature = (state.get("mismatch_attempts") or {}).get("signature")
-        attempts = state.get("mismatch_attempts") or {}
-        if signature:
-            attempts = {"signature": signature, "count": (attempts.get("count", 0) + 1) if signature == previous_signature else 1}
-        else:
-            attempts = {}
-        human_pending = bool(signature and attempts.get("count", 0) >= 3 and status == "FAIL")
-        visual_pending = status == "PASS" and args.mode != "quick" and state.get("visual_review") != "PASS"
-        if human_pending:
-            status = "NEEDS_HUMAN_REVIEW"
-            gate["status"] = status
-            gate.setdefault("checks", {})["photo_review"] = "NEEDS_HUMAN_REVIEW"
-        elif visual_pending:
-            status = "INCOMPLETE"
-            gate["status"] = status
-            gate.setdefault("checks", {})["visual_review"] = "NOT_CHECKED"
-            gate.setdefault("gate", {}).setdefault("incomplete", []).append("visual_review=NOT_CHECKED")
-        if (human_pending or visual_pending) and gate_path:
-            write_json(os.path.join(ROOT, gate_path), gate)
-        next_action = next_for(status, os.path.basename(generator), args.mode)
-        if human_pending:
-            next_action = {"command": None, "reason": "same photo mismatch reached 3 attempts; inspect the photo_refs and comparison sheets manually"}
-        elif visual_pending:
-            next_action = {"command": review_command(gate),
-                           "reason": "inspect the listed current artifacts, then record the review"}
-        brief = builder_brief(gate, status)
-        state.update({
-            "current_stage": f"{args.mode}:{status}", "generator": os.path.relpath(generator, ROOT),
-            "generator_hash": gen_hash, "current_preview_hash": preview_hash,
-            "last_gate": gate, "mismatch_attempts": attempts, "next_action": next_action,
-        })
-        save_state(state)
-        try:
-            project_state.sync(state, gate, args.label or args.mode)
-        except OSError as ex:  # noqa: BLE001 - the projection must not decide the gate
-            sys.stderr.write("[state] write failed: %s\n" % ex)
-        result = {
-            "status": status, "project": NAME, "asset": gate.get("asset"), "checks": gate.get("checks", {}),
-            "errors": gate.get("errors", []), "warnings": (gate.get("check") or {}).get("warnings", []),
-            "photo_mismatch": (gate.get("photo") or {}).get("mismatch"),
-            "action_tags": (gate.get("agent") or {}).get("action_tags", []), "next_action": state["next_action"],
-            "builder_brief": brief,
-            "gate": gate_path, "state": os.path.relpath(STATE, ROOT), "log": os.path.relpath(log_path, ROOT),
+        if not vvals:
+            result, code = cycle_once(args, generator, base_env, args.label)
+            emit(result, args.json, code)
+        runs, worst = [], 0
+        for value in vvals:
+            env = dict(base_env, **{vkey: value})
+            label = f"{args.label or args.mode}_{value}"
+            result, code = cycle_once(args, generator, env, label, pin_asset=True)
+            result["variant"] = f"{vkey}={value}"
+            runs.append(result)
+            worst = max(worst, code)
+        statuses = [r.get("status", "FAIL") for r in runs]
+        status = next((s for s in STATUS_ORDER if s in statuses), "FAIL")
+        summary = {"status": status, "project": NAME, "mode": args.mode, "variants": runs}
+        failing = [r for r in runs if r.get("status") != "PASS"]
+        if failing:
+            summary["next_action"] = failing[0].get("next_action")
+        emit(summary, args.json, worst)
+
+
+def cycle_once(args, generator, env_over, label, pin_asset=False):
+    """One gate run (with optional environment overrides for the generator). Returns (result dict, exit code); the caller holds the lock."""
+    cmd = [PY, os.path.join(KIT, "tools", "cycle.py"), generator, "--mode", args.mode, "--json"]
+    if label:
+        cmd += ["--label", label]
+    env = dict(os.environ, **env_over) if env_over else None
+    code, log = run(cmd, env)
+    os.makedirs(os.path.join(ROOT, "work", "logs"), exist_ok=True)
+    log_path = os.path.join(ROOT, "work", "logs", "last_cycle.log")
+    with open(log_path, "w", encoding="utf-8") as f:
+        f.write(log)
+    gate = None
+    gate_path = None
+    for line in log.splitlines():
+        if line.startswith("[json] "):
+            gate_path = line[7:].strip()
+            gate = read_json(os.path.join(ROOT, gate_path), None)
+    asset_name = (gate or {}).get("asset")
+    mirror = asset_mirror(asset_name) if asset_name else None
+    state = read_json(mirror) if mirror and os.path.isfile(mirror) else read_json(STATE)    # per-asset history when it exists
+    gen_hash = digest(generator)
+    if state.get("generator_hash") != gen_hash:
+        state["visual_review"] = "NOT_CHECKED"
+    if gate is None:
+        gate = {
+            "status": "FAIL", "project": NAME, "generator": os.path.basename(generator), "mode": args.mode,
+            "checks": {"build": "FAIL"}, "errors": [{"msg": "cycle failed before gate.json; see the raw log"}],
+            "next_action": next_for("FAIL", os.path.basename(generator)),
         }
-        if args.jsonl:
-            record = {
-                "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-                "mode": args.mode, "label": args.label or None, "status": status, "project": NAME,
-                "generator": os.path.relpath(generator, ROOT), "generator_hash": gen_hash,
-                "preview_hash": preview_hash, "checks": gate.get("checks", {}),
-                "photo_mismatch": (gate.get("photo") or {}).get("mismatch"), "gate": gate_path,
-                "next_action": state["next_action"].get("command") if state.get("next_action") else None,
-            }
-            jsonl_path = args.jsonl if os.path.isabs(args.jsonl) else os.path.join(ROOT, args.jsonl)
-            try:
-                os.makedirs(os.path.dirname(jsonl_path) or ".", exist_ok=True)
-                with open(jsonl_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
-            except OSError as ex:  # noqa: BLE001 - logging must not decide the gate
-                sys.stderr.write("[jsonl] write failed: %s\n" % ex)
-        if args.brief:
-            result = {"status": status, "project": NAME, "mode": args.mode, "next_action": state["next_action"]}
-            if status != "PASS":
-                result.update(checks=gate.get("checks", {}), gate=gate_path,
-                              photo_mismatch=(gate.get("photo") or {}).get("mismatch"),
-                              builder_brief=brief)
-                errors = gate.get("errors", [])
-                if errors:
-                    first = errors[0]
-                    result["error"] = {"key": first.get("key"), "message": first.get("msg"),
-                                       "example": (first.get("examples") or [None])[0]}
-        emit(result, args.json, 0 if status == "PASS" else 1 if status == "FAIL" else 2)
+    preview_rel = (gate.get("artifacts") or {}).get("preview")
+    preview_path = os.path.join(ROOT, preview_rel) if preview_rel else None
+    preview_hash = digest(preview_path) if preview_path and os.path.isfile(preview_path) else None
+    if args.mode != "quick" and state.get("reviewed_preview_hash") != preview_hash:
+        state["visual_review"] = "NOT_CHECKED"
+    status = gate.get("status", "FAIL")
+    mismatch_keys = sorted(line.split(":", 1)[0] for line in (gate.get("photo") or {}).get("lines", [])
+                           if line.startswith("PHOTO_MISMATCH"))
+    signature = "\n".join(mismatch_keys)
+    previous_signature = (state.get("mismatch_attempts") or {}).get("signature")
+    attempts = state.get("mismatch_attempts") or {}
+    if signature:
+        attempts = {"signature": signature, "count": (attempts.get("count", 0) + 1) if signature == previous_signature else 1}
+    else:
+        attempts = {}
+    human_pending = bool(signature and attempts.get("count", 0) >= 3 and status == "FAIL")
+    visual_pending = status == "PASS" and args.mode != "quick" and state.get("visual_review") != "PASS"
+    if human_pending:
+        status = "NEEDS_HUMAN_REVIEW"
+        gate["status"] = status
+        gate.setdefault("checks", {})["photo_review"] = "NEEDS_HUMAN_REVIEW"
+    elif visual_pending:
+        status = "INCOMPLETE"
+        gate["status"] = status
+        gate.setdefault("checks", {})["visual_review"] = "NOT_CHECKED"
+        gate.setdefault("gate", {}).setdefault("incomplete", []).append("visual_review=NOT_CHECKED")
+    if (human_pending or visual_pending) and gate_path:
+        write_json(os.path.join(ROOT, gate_path), gate)
+    next_action = next_for(status, os.path.basename(generator), args.mode)
+    if human_pending:
+        next_action = {"command": None, "reason": "same photo mismatch reached 3 attempts; inspect the photo_refs and comparison sheets manually"}
+    elif visual_pending:
+        next_action = {"command": review_command(gate, pin_asset),
+                       "reason": "inspect the listed current artifacts, then record the review"}
+    brief = builder_brief(gate, status)
+    state.update({
+        "current_stage": f"{args.mode}:{status}", "generator": os.path.relpath(generator, ROOT),
+        "generator_hash": gen_hash, "current_preview_hash": preview_hash,
+        "last_gate": gate, "mismatch_attempts": attempts, "next_action": next_action,
+    })
+    save_state(state)
+    try:
+        project_state.sync(state, gate, label or args.mode)
+    except OSError as ex:  # noqa: BLE001 - the projection must not decide the gate
+        sys.stderr.write("[state] write failed: %s\n" % ex)
+    result = {
+        "status": status, "project": NAME, "asset": gate.get("asset"), "checks": gate.get("checks", {}),
+        "errors": gate.get("errors", []), "warnings": (gate.get("check") or {}).get("warnings", []),
+        "photo_mismatch": (gate.get("photo") or {}).get("mismatch"),
+        "action_tags": (gate.get("agent") or {}).get("action_tags", []), "next_action": state["next_action"],
+        "builder_brief": brief,
+        "gate": gate_path, "state": os.path.relpath(STATE, ROOT), "log": os.path.relpath(log_path, ROOT),
+    }
+    if args.jsonl:
+        record = {
+            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+            "mode": args.mode, "label": label or None, "status": status, "project": NAME,
+            "generator": os.path.relpath(generator, ROOT), "generator_hash": gen_hash,
+            "preview_hash": preview_hash, "checks": gate.get("checks", {}),
+            "photo_mismatch": (gate.get("photo") or {}).get("mismatch"), "gate": gate_path,
+            "next_action": state["next_action"].get("command") if state.get("next_action") else None,
+        }
+        jsonl_path = args.jsonl if os.path.isabs(args.jsonl) else os.path.join(ROOT, args.jsonl)
+        try:
+            os.makedirs(os.path.dirname(jsonl_path) or ".", exist_ok=True)
+            with open(jsonl_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+        except OSError as ex:  # noqa: BLE001 - logging must not decide the gate
+            sys.stderr.write("[jsonl] write failed: %s\n" % ex)
+    if args.brief:
+        result = {"status": status, "project": NAME, "mode": args.mode, "next_action": state["next_action"]}
+        if status != "PASS":
+            result.update(checks=gate.get("checks", {}), gate=gate_path,
+                          photo_mismatch=(gate.get("photo") or {}).get("mismatch"),
+                          builder_brief=brief)
+            errors = gate.get("errors", [])
+            if errors:
+                first = errors[0]
+                result["error"] = {"key": first.get("key"), "message": first.get("msg"),
+                                   "example": (first.get("examples") or [None])[0]}
+    return result, 0 if status == "PASS" else 1 if status == "FAIL" else 2
 
 
 def glb_mass(args):
@@ -542,9 +615,24 @@ def observe(args):
           "next_action": {"command": None, "reason": "unchanged observed photos do not need to be read again"}}, args.json)
 
 
+def assets(args):
+    """Per-asset status from work/assets/*.json (one mirror per asset; agent_state.json is only the last run)."""
+    require_project()
+    rows = []
+    for f in sorted(os.listdir(ASSET_STATES)) if os.path.isdir(ASSET_STATES) else []:
+        s = read_json(os.path.join(ASSET_STATES, f))
+        g = s.get("last_gate") or {}
+        rows.append({"asset": f[:-5], "stage": s.get("current_stage"), "status": g.get("status"),
+                     "visual_review": s.get("visual_review"), "generator": s.get("generator"), "updated_at": s.get("updated_at")})
+    if not args.json:
+        for r in rows:
+            print(f"{r['asset']:46} {str(r['status']):10} review={r['visual_review']}  {r['stage']}  {r['updated_at']}")
+    emit({"status": "OK", "assets": rows}, args.json)
+
+
 def review(args):
     require_project()
-    state = read_json(STATE)
+    state = read_json(asset_mirror(find_mirror(args.asset))) if args.asset else read_json(STATE)
     gate = state.get("last_gate")
     if not gate:
         raise SystemExit("run a visual or final cycle before review")
@@ -585,7 +673,7 @@ def review(args):
     state["last_gate"] = gate
     state["current_stage"] = f"review:{gate['status']}"
     if review_status == "PARTIAL":
-        state["next_action"] = {"command": review_command(gate), "reason": "review all required current artifacts"}
+        state["next_action"] = {"command": review_command(gate, bool(args.asset)), "reason": "review all required current artifacts"}
     elif review_status == "NEEDS_HUMAN_REVIEW":
         state["next_action"] = {"command": None, "reason": "visual input unavailable; a human must inspect the current artifacts"}
     else:
@@ -732,7 +820,11 @@ def main():
     p.add_argument("--status", choices=("PASS", "FAIL", "NEEDS_HUMAN_REVIEW"), required=True)
     p.add_argument("--note", required=True)
     p.add_argument("--artifact", action="append", default=[])
+    p.add_argument("--asset", default="", help="review this asset's saved state (exact name or unique substring); default = last run")
     p.set_defaults(fn=review)
+    p = sub.add_parser("assets", help="status of every asset that has been through a cycle (work/assets/)")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=assets)
     p = sub.add_parser("cycle")
     p.add_argument("--json", action="store_true")
     p.add_argument("--brief", action="store_true")
@@ -740,6 +832,9 @@ def main():
     p.add_argument("--mode", choices=("quick", "visual", "final"), default="quick")
     p.add_argument("--label", default="")
     p.add_argument("--jsonl", help="append one compact record per run to this file (relative paths are inside the project)")
+    p.add_argument("--env", action="append", default=[], metavar="KEY=VALUE", help="environment variable for the generator (repeatable)")
+    p.add_argument("--variants", default="", metavar="KEY=a,b,c",
+                   help="run the gate once per value of an environment variable the generator reads, e.g. TOWER=L,I,M; labels get _<value>")
     p.set_defaults(fn=normalized_cycle)
     p = sub.add_parser("fix")
     p.add_argument("--json", action="store_true")
