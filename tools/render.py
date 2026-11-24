@@ -364,7 +364,7 @@ def _file_sig(h, path):
     h.update(f"{os.path.basename(path)}:{st.st_size}:{st.st_mtime_ns}".encode("utf-8"))
 
 
-RENDER_CACHE_VERSION = 3
+RENDER_CACHE_VERSION = 4
 
 
 def render_cache_key(args):

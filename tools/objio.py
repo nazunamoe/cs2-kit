@@ -147,6 +147,22 @@ def find_asset(path):
     raise SystemExit(f"no OBJ found: {path}\n  (if only FBX exists: python tools/run_blender.py --fbx2obj {path})")
 
 
+def _fix_legacy_zup(meshes):
+    """Old exports (e.g. the test4 project) wrote a z-up OBJ, but load_obj assumes y-up and lays the building down.
+    A modern asset has its lowest point at z ~ 0; a laid-down one sinks below the ground with y max ~ 0.
+    Rotate every mesh back: loaded (x, -z, y) -> file (x, y, z)."""
+    main = meshes.get("main")
+    if main is None or not len(main.verts):
+        return False
+    v = np.asarray(main.verts)
+    if v[:, 2].min() < -1.0 and abs(v[:, 1].max()) < 0.05:
+        for m in meshes.values():
+            w = np.asarray(m.verts)
+            m.verts = np.column_stack([w[:, 0], w[:, 2], -w[:, 1]])
+        return True
+    return False
+
+
 def load_asset(path):
     asset, objdir, texdir = find_asset(path)
     meshes = {}
@@ -154,6 +170,7 @@ def load_asset(path):
         p = os.path.join(objdir, asset + suf + ".obj")
         if os.path.exists(p):
             meshes[key] = load_obj(p)
+    _fix_legacy_zup(meshes)
     man = None
     for mp in (os.path.join(texdir, "manifest.json"), os.path.join(objdir, "manifest.json")):
         if os.path.exists(mp):

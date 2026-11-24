@@ -30,22 +30,8 @@ def has_obj(a):
     return False
 
 
-def fix_legacy(M):
-    """Old exports (e.g. the test4 project) wrote a z-up OBJ; the loader assumes y-up and lays the building down.
-    Detect it (main sinks below the ground and its y max is 0) and rotate every mesh back."""
-    m = M.get("main")
-    if m is None:
-        return
-    v = np.asarray(m.verts)
-    if v[:, 2].min() < -1.0 and abs(v[:, 1].max()) < 0.05:
-        for mm in M.values():
-            w = np.asarray(mm.verts)
-            mm.verts = np.column_stack([w[:, 0], w[:, 2], -w[:, 1]])      # loaded (x, -z, y) -> file (x, y, z)
-
-
 def render_pair(path):
     asset, M, texdir, man = R.load_asset(path)
-    fix_legacy(M)
     tex = R.Tex(texdir, asset, False, "color")
     parts = [(M.get("main"), "s"), (M.get("win"), "window"), (M.get("gls"), "glass")]
     col = R.render(parts, tex, YAW, PITCH, (SS, SS), "", label=False)
