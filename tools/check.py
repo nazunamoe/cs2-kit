@@ -204,11 +204,13 @@ class RayMesh:
     def hit(self, o, d, maxd):
         return self.hits(np.asarray([o]), np.asarray([d]), maxd)[0]
 
-    def hits(self, origins, directions, maxd):
-        """Nearest opaque hit for each ray, using only AABB candidates in each batch."""
+    def hits(self, origins, directions, maxd, want_idx=False):
+        """Nearest opaque hit for each ray, using only AABB candidates in each batch.
+        want_idx=True returns (distances, triangle index of the hit or -1) for diagnostics."""
         origins = np.asarray(origins, float)
         directions = np.asarray(directions, float)
         result = np.full(len(origins), np.inf)
+        hit_tri = np.full(len(origins), -1, np.int64) if want_idx else None
         for start in range(0, len(origins), 32):
             O = origins[start:start + 32, None, :]
             D = directions[start:start + 32, None, :]
@@ -249,6 +251,8 @@ class RayMesh:
                 ids = ids[np.argsort(t[b, ids])]
                 if self.alpha is None:
                     result[start + b] = t[b, ids[0]]
+                    if want_idx:
+                        hit_tri[start + b] = indices[b, ids[0]]
                     continue
                 for i in ids:
                     uv = UV[b, i, 0] * (1 - uu[b, i] - vv[b, i]) + UV[b, i, 1] * uu[b, i] + UV[b, i, 2] * vv[b, i]
@@ -256,8 +260,10 @@ class RayMesh:
                     px = int(np.clip(uv[0] * W, 0, W - 1)); py = int(np.clip((1 - uv[1]) * H, 0, H - 1))
                     if self.alpha[py, px] >= 127.5:
                         result[start + b] = t[b, i]
+                        if want_idx:
+                            hit_tri[start + b] = indices[b, i]
                         break
-        return result
+        return (result, hit_tri) if want_idx else result
 
 
 def rect_overlaps(R, eps=1e-7):
@@ -276,6 +282,40 @@ def rect_overlaps(R, eps=1e-7):
 
 
 # ---------------------------------------------------------------- 검사 본체
+def _blocker_summary(rm, man, Wq, centers, distances, hit_tri, ray):
+    """Which material blocks the blocked windows, from how far, and in which columns.
+    Material = atlas cell holding the hit triangle's UV centre (UVs are 0..1, so this also fits the LOD2 texture)."""
+    cells = []
+    for name, c in ((man or {}).get("atlas") or {}).get("cells", {}).items():
+        S = float(man["atlas"].get("size") or 0)
+        if S:
+            x, y, w, h = c["rect"]
+            cells.append((name, x / S, y / S, (x + w) / S, (y + h) / S))
+    reg, col = {}, {}
+    for i in np.nonzero((distances < ray).any(1))[0]:
+        k = int(np.argmin(np.where(hit_tri[i] >= 0, distances[i], np.inf)))
+        tri = int(hit_tri[i][k])
+        name = "?"
+        if tri >= 0 and cells:
+            u, v = rm.UV[tri].mean(0)
+            v = 1.0 - v
+            name = next((n for n, x0, y0, x1, y1 in cells if x0 - 1e-6 <= u <= x1 + 1e-6 and y0 - 1e-6 <= v <= y1 + 1e-6), "?")
+        r = reg.setdefault(name, [0, np.inf])
+        r[0] += 1
+        r[1] = min(r[1], float(distances[i][k]))
+        key = (round(float(centers[i][0]), 2), round(float(centers[i][1]), 2))
+        col[key] = col.get(key, 0) + 1
+    if not reg:
+        return None
+    top = sorted(reg.items(), key=lambda kv: -kv[1][0])
+    cols = sorted(col.items(), key=lambda kv: -kv[1])
+    return dict(
+        blockers=[dict(material=n, windows=c, min_distance_m=round(d, 3)) for n, (c, d) in top],
+        columns=[dict(x=k[0], y=k[1], windows=v) for k, v in cols],
+        blockers_text=", ".join(f"{n} x{c} (min {d:.3f} m)" for n, (c, d) in top[:4]),
+        columns_text=", ".join(f"({k[0]},{k[1]}) x{v}" for k, v in cols[:4]) + (f", +{len(cols) - 4} more" if len(cols) > 4 else ""))
+
+
 def check_asset(path, args):
     t0 = time.time()
     asset, M, texdir, man = load_asset(path)
@@ -478,14 +518,19 @@ def check_asset(path, args):
                                           Wq[:, 2] * 0.85 + Wq[:, 0] * 0.15), axis=1)
                 origins = (sample_points + Wn[:, None, :] * 0.005).reshape(-1, 3)
                 directions = np.repeat(Wn[:, None, :], 3, axis=1).reshape(-1, 3)
-                distances = rm.hits(origins, directions, args.ray).reshape(-1, 3)
+                distances, hit_tri = rm.hits(origins, directions, args.ray, want_idx=True)
+                distances, hit_tri = distances.reshape(-1, 3), hit_tri.reshape(-1, 3)
                 blocked = [np.round(centers[i], 2).tolist() for i in range(len(Wq)) if (distances[i] < args.ray).any()]
                 if wk == "win":
                     back_distances = rm.hits(centers - Wn * 0.001, -Wn, 1.0)
                     behind = [np.round(centers[i], 2).tolist() for i in range(len(Wq)) if back_distances[i] == np.inf]
             info["win_blocked"][wk] = len(blocked)
             if blocked:
+                why = _blocker_summary(rm, man, Wq, centers, distances, hit_tri, args.ray)
                 err("win_block_" + wk, f"WIN_BLOCKED {wk}: {len(blocked)} windows blocked by a part within {args.ray} m in front. example = window center xyz", blocked)
+                if why:
+                    E[-1]["detail"] = why
+                    E[-1]["msg"] += f" | blocked by: {why['blockers_text']} | columns (x,y): {why['columns_text']}"
             if behind:
                 warn("win_behind", f"{len(behind)} windows have no wall within 1 m behind (flipped or floating?)", behind)
     info["time_s"] = round(time.time() - t0, 1)
