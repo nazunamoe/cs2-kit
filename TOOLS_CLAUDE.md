@@ -9,6 +9,10 @@ python tools/agent.py doctor --project P --json
 python tools/agent.py resume --project P --json
 python tools/agent.py cycle --project P --generator G --mode quick|visual|final --label STEP --brief --json
 python tools/agent.py review --project P --status PASS|FAIL|NEEDS_HUMAN_REVIEW --note NOTE --artifact PATH --json
+python tools/agent.py cycle --project P --generator G --mode final --variants TOWER=L,I,M --label STEP --json   # one gate per value of an env var the generator reads
+python tools/agent.py cycle --project P --generator G --env TYPE=C --json                                      # fixed env var(s) for the generator
+python tools/agent.py review --project P --asset NAME --status PASS --note NOTE --artifact PATH --json         # review a saved asset (exact name or unique substring)
+python tools/agent.py assets --project P [--json]                                                              # status of every asset that went through a cycle
 python tools/agent.py photos --project P --page 0 --page-size 16 --json
 python tools/agent.py observe --project P --photo photos/front.jpg --side front --note NOTE --json
 python tools/agent.py probe --project P --shot 101_side5.png --frame work/frame_101.json --px X,Y [--px X,Y | --frac FX,FY] --json
@@ -18,6 +22,8 @@ python tools/agent.py fix --project P --generator G --finish --json
 ```
 
 The agent result contains `status`, per-check states, errors/warnings, `next_action`, and paths to detailed gate/log/state files. It deliberately does not echo the full report. Agent runs use a per-project lock and explicit project paths. A lock whose process has exited (or whose pid was recycled) is removed with a `[lock]` notice on stderr; a lock held by a live run ends the command with exit code 3 and, with `--json`, `{"status": "LOCKED", "pid": ...}` on stdout. Exit codes: 0 PASS, 1 FAIL, 2 INCOMPLETE, 3 LOCKED.
+
+When one generator builds several assets (an env var picks the tower or type), `agent.py cycle --variants KEY=a,b,c` runs the chosen mode once per value under one lock: labels become `<label>_<value>`, the exit code is the worst of the runs, and each variant's `next_action` review command already carries `--asset`. Every cycle and review also writes `work/assets/<asset>.json`, so reviewing one asset no longer loses another's state; `work/agent_state.json` (and `resume`, `doctor`, the Stop hook) still mean "last run". Run `agent.py assets` to see all of them. `check.py` now names the material that blocks windows (`WIN_BLOCKED ... | blocked by: rail x75 (min 0.115 m) | columns (x,y): ...`, also in the error's `detail`): an alpha rail bar or grille bar hitting a window check point is the usual cause, so change that part's width or phase slightly. Old z-up OBJ exports (test4) are rotated upright by `objio.load_asset` when the main mesh sinks below the ground.
 
 `probe` (read-only, needs the asset `.blend` from a final build) answers "which face, material and coordinate does this photo pixel land on?" before you edit: it casts a ray through the pixel with the same camera as `tools/qa/cmp_cam.py --frame` (LOD meshes removed) and prints the object (main or window), atlas region, normal, asset xyz and generator xyz. Pixels are in the original photo; `--frac` takes fractions of width and height. Parts the generator rotates are not converted to local coordinates. 104 needs `--frame work/frame_104_gen.json`.
 
@@ -66,6 +72,7 @@ python tools/render.py output/A -o previews/a.png --views front,iso,top,lod1,lod
 python tools/render.py output/A -o previews/z.png --views front --zoom 3,0.5,0.1
 python tools/render.py output/A -o previews/b.png --views yaw30:pitch5 --box=-10,10,-5,3,0,8
 python tools/render.py output/A -o previews/n.png --views front --night
+python tools/render.py output/A -o previews/t.png --views iso --size 1600x1600 --transparent   # RGBA silhouette PNG (no antialiasing: render large and downscale); see tools/make_icons.py
 python tools/photo_check.py output/A
 python tools/tile_compare.py output/A --tile-m 6x5 --top 3
 ```

@@ -13,6 +13,8 @@
 
 `tools/sync_branches.py` 는 저장소 관리용이다(프로젝트 chdir 없음). 원격에서 fetch 한 뒤 로컬 브랜치를 **ff-only**로만 맞추고, 브랜치 간 드리프트(한쪽에만 있는 커밋)를 보고한다. `--check` 는 쓰기 없이 검사만 하고 드리프트가 있으면 exit 1.
 
+한 생성기가 환경변수로 여러 에셋을 만들 때(`TOWER=I|L|M` 등): `agent.py cycle --variants TOWER=L,I,M --mode final` 이 값마다 게이트를 돌리고(라벨 `_<값>`, 종료 코드는 가장 나쁜 것), `agent.py review --asset <이름>` 이 그 에셋의 저장 상태(`work/assets/<에셋>.json`)로 리뷰한다. `agent.py assets` 는 에셋별 상태 목록이다. `work/agent_state.json` 은 계속 "마지막 실행"이다.
+
 `tools/state.py` 는 `work/agent_state.json` 을 `work/state.yaml` 로 투영한다(단계·게이트·산출물 해시). `tools/docs_gen.py` 는 각 도구의 `--help` 로 `docs/agent/TOOL_<name>.md` 를 다시 쓴다. 둘 다 프로젝트/키트 루트에서 실행한다.
 
 ## 통합 검증 (`tools/qa/verify.py`)

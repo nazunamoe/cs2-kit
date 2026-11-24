@@ -5,15 +5,17 @@
 
 ```text
 usage: agent.py [-h] [--json]
-                {doctor,resume,glb-mass,photos,evidence,probe,colordiff,observe,review,cycle,fix} ...
+                {doctor,resume,glb-mass,photos,evidence,probe,colordiff,observe,review,assets,cycle,fix} ...
 
 Portable agent entry point. Run from the kit root with an explicit --project.
 
 positional arguments:
-  {doctor,resume,glb-mass,photos,evidence,probe,colordiff,observe,review,cycle,fix}
+  {doctor,resume,glb-mass,photos,evidence,probe,colordiff,observe,review,assets,cycle,fix}
     probe               photo pixel -> model face, material and coordinate
                         (read-only)
     colordiff           photo colour vs model material mismatches (read-only)
+    assets              status of every asset that has been through a cycle
+                        (work/assets/)
 
 options:
   -h, --help            show this help message and exit

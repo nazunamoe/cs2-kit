@@ -7,7 +7,7 @@
 usage: render.py [-h] -o OUT [--views VIEWS] [--size SIZE] [--zoom ZOOM]
                  [--box BOX] [--photo PHOTO]
                  [--mode {color,normal,ctrl,emissive}] [--night] [--nolabel]
-                 [--no-cache]
+                 [--no-cache] [--transparent]
                  path
 
 positional arguments:
@@ -25,4 +25,6 @@ options:
   --night
   --nolabel
   --no-cache
+  --transparent         RGBA PNG with a transparent background (building
+                        silhouette); the label is dropped
 ```
